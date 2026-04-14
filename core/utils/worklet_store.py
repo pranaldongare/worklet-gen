@@ -23,7 +23,7 @@ ARRAY_FIELDS: tuple[str, ...] = (
     "prerequisites",
 )
 
-OBJECT_FIELDS: tuple[str, ...] = ("milestones",)
+OBJECT_FIELDS: tuple[str, ...] = ("milestones", "budget_estimation", "risk_assessment")
 
 ITERATABLE_FIELDS: tuple[str, ...] = STRING_FIELDS + ARRAY_FIELDS + OBJECT_FIELDS
 

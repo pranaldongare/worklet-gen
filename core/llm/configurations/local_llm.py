@@ -60,12 +60,23 @@ class MyServerLLM(LLM):
         Blocks concurrent requests for the same (model, port).
         """
         with model_port_lock(self.model, self.port):
-            print(f"Processing request for model={self.model}, port={self.port}")
+            # Read thinking switch at call time so toggles take effect immediately
+            from core.constants import SWITCHES
+
+            self._client.reasoning = not SWITCHES.get("DISABLE_THINKING", True)
+            print(
+                f"Processing request for model={self.model}, port={self.port}, "
+                f"reasoning={self._client.reasoning}"
+            )
             try:
                 response = self._client.invoke(prompt, stop=stop)
+                # Strip thinking/reasoning tags from output
                 cleaned_text = re.sub(
                     r"<think>.*?</think>", "", response.content, flags=re.DOTALL
                 )
-                return cleaned_text
+                cleaned_text = re.sub(
+                    r"<reasoning>.*?</reasoning>", "", cleaned_text, flags=re.DOTALL
+                )
+                return cleaned_text.strip()
             except Exception as e:
                 raise RuntimeError(f"Failed to call Ollama locally: {e}") from e

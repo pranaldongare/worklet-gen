@@ -368,6 +368,18 @@ async def generate_files(state: AgentState) -> AgentState:
         },
     )
 
+    # Compute worklet similarity
+    try:
+        from core.utils.similarity import compute_worklet_similarities
+        similar_pairs = compute_worklet_similarities(state.worklets)
+        if similar_pairs:
+            db.threads.update_one(
+                {"thread_id": state.thread_id},
+                {"$set": {"similarity_data": similar_pairs}},
+            )
+    except Exception as e:
+        print(f"Similarity detection skipped: {e}")
+
     s = time.time()
     for idx, worklet in enumerate(state.worklets):
         await generate_file(worklet=worklet, thread_id=state.thread_id)

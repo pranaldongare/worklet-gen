@@ -7,6 +7,12 @@ export interface Reference {
   description: string;
   /** Tag indicating the source of the reference, e.g., 'web', 'scholar' */
   tag: string;
+  /** Number of citations (Scholar) or stars (GitHub) */
+  citation_count?: number | null;
+  /** Publication year */
+  published_year?: number | null;
+  /** Computed quality score 0-1 */
+  quality_score?: number | null;
 }
 
 export interface StringAttribute {
@@ -55,6 +61,10 @@ export interface TransformedWorklet {
   tech_stack: StringAttribute;
   /** Transformed milestones attribute */
   milestones: ObjectAttribute;
+  /** Transformed budget estimation attribute */
+  budget_estimation?: ObjectAttribute;
+  /** Transformed risk assessment attribute */
+  risk_assessment?: ObjectAttribute;
   /** List of relevant academic references or papers for the project idea */
   references: Reference[];
 }
@@ -100,6 +110,10 @@ export interface Worklet {
   tech_stack: string;
   /** Milestones for the project idea over a 6-month period */
   milestones: Record<string, any>;
+  /** Budget estimation breakdown */
+  budget_estimation?: Record<string, any>;
+  /** Risk assessment */
+  risk_assessment?: Record<string, any>;
   /** List of relevant academic references or papers for the project idea */
   references: Reference[];
 }
@@ -116,7 +130,9 @@ export type WorkletFieldKey =
   | 'prerequisites'
   | 'infrastructure_requirements'
   | 'tech_stack'
-  | 'milestones';
+  | 'milestones'
+  | 'budget_estimation'
+  | 'risk_assessment';
 
 export interface SelectIterationResponse {
   success: boolean;
@@ -145,6 +161,14 @@ export interface SelectWorkletIterationResponse {
   selected_iteration_index: number;
 }
 
+export interface SimilarityPair {
+  worklet_a_id: string;
+  worklet_b_id: string;
+  worklet_a_title: string;
+  worklet_b_title: string;
+  similarity_score: number;
+}
+
 export interface Thread {
   thread_id: string;
   thread_name: string;
@@ -156,6 +180,7 @@ export interface Thread {
   generated: boolean;
   created_at: string;
   worklets?: WorkletWithIterations[];
+  similarity_data?: SimilarityPair[];
   /** Indicates this thread object was created optimistically on the client and not yet confirmed via GET /thread/{id} */
   local?: boolean;
 }

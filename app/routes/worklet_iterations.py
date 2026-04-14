@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from core.constants import WORKLET_GENERATOR_LLM
 from core.database import db
 from core.llm.client import invoke_llm
+from core.llm.prompts.budget_prompt import build_budget_estimation_prompt
+from core.llm.prompts.risk_prompt import build_risk_assessment_prompt
 from core.llm.outputs import Worklet as WorkletOutput
 from core.llm.prompts.worklet_enhancement_prompt import (
     build_worklet_enhancement_prompt,
@@ -51,6 +53,13 @@ class SelectWorkletIterationResponse(BaseModel):
     success: bool
     worklet_id: str
     selected_iteration_index: int
+
+
+class GenerateFieldRequest(BaseModel):
+    worklet_id: str = Field(..., description="Identifier of the worklet")
+    worklet_iteration_id: str = Field(
+        ..., description="Identifier of the iteration to base generation on"
+    )
 
 
 async def _load_worklet_record(worklet_id: str) -> dict:
@@ -163,8 +172,12 @@ async def enhance_worklet(payload: EnhanceWorkletRequest):
     if enhanced_worklet is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=last_error
-            or "Enhancement model failed to produce a valid response.",
+            detail={
+                "code": "LLM_FAILURE",
+                "message": last_error
+                or "Enhancement model failed to produce a valid response.",
+                "retryable": True,
+            },
         )
 
     if not isinstance(enhanced_worklet, WorkletOutput):
@@ -237,3 +250,135 @@ async def select_default_iteration(payload: SelectWorkletIterationRequest):
         worklet_id=payload.worklet_id,
         selected_iteration_index=selected_index,
     )
+
+
+@router.post("/generate-budget")
+async def generate_budget(payload: GenerateFieldRequest):
+    container = await _load_worklet_record(payload.worklet_id)
+    thread_id = container["thread_id"]
+    worklet_record = container["record"]
+    base_iteration = _find_iteration(worklet_record, payload.worklet_iteration_id)
+    base_worklet: Worklet = iteration_to_worklet(base_iteration)
+
+    prompt = build_budget_estimation_prompt(base_worklet)
+
+    from app.routes.iterate import ObjectFieldResponse
+
+    new_value = None
+    last_error = None
+    for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
+        try:
+            llm_response = await invoke_llm(
+                gpu_model=WORKLET_GENERATOR_LLM.model,
+                response_schema=ObjectFieldResponse,
+                contents=prompt,
+                port=WORKLET_GENERATOR_LLM.port,
+            )
+            if isinstance(llm_response.updated_value, dict):
+                new_value = llm_response.updated_value
+                break
+        except Exception as exc:
+            last_error = f"Attempt {attempt}: {exc}"
+
+    if new_value is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "LLM_FAILURE",
+                "message": last_error or "Budget generation failed.",
+                "retryable": True,
+            },
+        )
+
+    field_payload = base_iteration.get("budget_estimation", {"selected_index": 0, "iterations": [{}]})
+    existing = list(field_payload.get("iterations", [{}]))
+    updated = [*existing, new_value]
+    new_index = len(updated) - 1
+
+    db.threads.update_one(
+        {"_id": thread_id},
+        {
+            "$set": {
+                "worklets.$[worklet].iterations.$[iteration].budget_estimation.iterations": updated,
+                "worklets.$[worklet].iterations.$[iteration].budget_estimation.selected_index": new_index,
+            }
+        },
+        array_filters=[
+            {"worklet.worklet_id": payload.worklet_id},
+            {"iteration.iteration_id": payload.worklet_iteration_id},
+        ],
+    )
+
+    return {
+        "worklet_id": payload.worklet_id,
+        "worklet_iteration_id": payload.worklet_iteration_id,
+        "field": "budget_estimation",
+        "selected_index": new_index,
+        "iterations": updated,
+    }
+
+
+@router.post("/generate-risk")
+async def generate_risk(payload: GenerateFieldRequest):
+    container = await _load_worklet_record(payload.worklet_id)
+    thread_id = container["thread_id"]
+    worklet_record = container["record"]
+    base_iteration = _find_iteration(worklet_record, payload.worklet_iteration_id)
+    base_worklet: Worklet = iteration_to_worklet(base_iteration)
+
+    prompt = build_risk_assessment_prompt(base_worklet)
+
+    from app.routes.iterate import ObjectFieldResponse
+
+    new_value = None
+    last_error = None
+    for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
+        try:
+            llm_response = await invoke_llm(
+                gpu_model=WORKLET_GENERATOR_LLM.model,
+                response_schema=ObjectFieldResponse,
+                contents=prompt,
+                port=WORKLET_GENERATOR_LLM.port,
+            )
+            if isinstance(llm_response.updated_value, dict):
+                new_value = llm_response.updated_value
+                break
+        except Exception as exc:
+            last_error = f"Attempt {attempt}: {exc}"
+
+    if new_value is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "LLM_FAILURE",
+                "message": last_error or "Risk assessment generation failed.",
+                "retryable": True,
+            },
+        )
+
+    field_payload = base_iteration.get("risk_assessment", {"selected_index": 0, "iterations": [{}]})
+    existing = list(field_payload.get("iterations", [{}]))
+    updated = [*existing, new_value]
+    new_index = len(updated) - 1
+
+    db.threads.update_one(
+        {"_id": thread_id},
+        {
+            "$set": {
+                "worklets.$[worklet].iterations.$[iteration].risk_assessment.iterations": updated,
+                "worklets.$[worklet].iterations.$[iteration].risk_assessment.selected_index": new_index,
+            }
+        },
+        array_filters=[
+            {"worklet.worklet_id": payload.worklet_id},
+            {"iteration.iteration_id": payload.worklet_iteration_id},
+        ],
+    )
+
+    return {
+        "worklet_id": payload.worklet_id,
+        "worklet_iteration_id": payload.worklet_iteration_id,
+        "field": "risk_assessment",
+        "selected_index": new_index,
+        "iterations": updated,
+    }

@@ -12,6 +12,7 @@ from app.routes import (
     generate,
     health,
     iterate,
+    manual_edit,
     select,
     thread,
     worklet_iterations,
@@ -34,16 +35,18 @@ fastapi_app.add_middleware(
 # Consistent error handlers
 @fastapi_app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
+    detail = exc.detail
+    if isinstance(detail, dict):
+        content = {"error": {**detail, "path": str(request.url.path)}}
+    else:
+        content = {
             "error": {
                 "code": exc.status_code,
-                "message": exc.detail,
+                "message": detail,
                 "path": str(request.url.path),
             }
-        },
-    )
+        }
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @fastapi_app.exception_handler(RequestValidationError)
@@ -83,5 +86,6 @@ fastapi_app.include_router(generate.router)
 fastapi_app.include_router(iterate.router)
 fastapi_app.include_router(select.router)
 fastapi_app.include_router(worklet_iterations.router)
+fastapi_app.include_router(manual_edit.router)
 
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)

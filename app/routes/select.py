@@ -21,6 +21,8 @@ VALID_FIELDS: set[str] = {
     "infrastructure_requirements",
     "tech_stack",
     "milestones",
+    "budget_estimation",
+    "risk_assessment",
 }
 
 
@@ -40,6 +42,8 @@ class SelectFieldRequest(BaseModel):
         "infrastructure_requirements",
         "tech_stack",
         "milestones",
+        "budget_estimation",
+        "risk_assessment",
     ]
     selected_index: int = Field(
         ..., ge=0, description="Index to select within the iterations array"

@@ -1,3 +1,5 @@
+import re
+
 from core.models.worklet import Reference
 from core.references.scholar_package import CustomGoogleScholarOrganic
 
@@ -40,12 +42,18 @@ def get_google_scholar_references(keyword):
                 description = slice_to_100_words(description)
             else:
                 description = "Did not find any description for this paper just sort them as you see fit try to keep one with tag scholar in front"
+            citation_count = i.get("cited_by_count")
+            pub_info = i.get("publication_info", "")
+            year_match = re.search(r'\b(19|20)\d{2}\b', pub_info)
+            published_year = int(year_match.group()) if year_match else None
             result.append(
                 Reference(
                     title=title,
                     link=i.get("title_link", ""),
                     description=description,
                     tag="scholar",
+                    citation_count=citation_count,
+                    published_year=published_year,
                 )
             )
         return result

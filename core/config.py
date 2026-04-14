@@ -19,6 +19,20 @@ class Settings(BaseSettings):
     VISION_URL: str
     USE_VISION_MODEL: bool = False
 
+    # Ollama LLM configuration
+    OLLAMA_MODEL: str = "gpt-oss:20b-50k-8k"
+    OLLAMA_IMAGE_MODEL: str = "gemma3:12b"
+    OLLAMA_PORT1: int = 11434
+    OLLAMA_PORT2: int = 11435
+    OLLAMA_MAX_TOKENS: int = 50000
+
+    # Fallback model names
+    FALLBACK_GEMINI_MODEL: str = "gemini-2.0-flash"
+    FALLBACK_OPENAI_MODEL: str = "gpt-4o-mini"
+
+    # Thinking mode
+    DISABLE_THINKING: bool = True
+
     class Config:
         env_file = ".env"
         extra = "allow"

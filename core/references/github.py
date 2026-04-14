@@ -1,3 +1,4 @@
+import re
 import requests
 import time
 
@@ -42,12 +43,18 @@ def get_github_references(keyword):
         description = item.get("description") or ""
         if description:
             description = slice_to_100_words(description)
+        stars = item.get("stargazers_count", 0)
+        created_at_str = item.get("created_at", "")
+        year_match = re.search(r'(\d{4})', created_at_str)
+        published_year = int(year_match.group(1)) if year_match else None
         result.append(
             Reference(
                 title=item.get("name", ""),
                 description=description,
                 link=item.get("html_url", ""),
                 tag="github",
+                citation_count=stars,
+                published_year=published_year,
             )
         )
 

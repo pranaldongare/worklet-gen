@@ -4,8 +4,9 @@ export class ApiError extends Error {
     details?: unknown;
     path?: string;
     raw?: unknown;
+    retryable?: boolean;
 
-    constructor(message: string, opts: { status: number; code?: number; details?: unknown; path?: string; raw?: unknown }) {
+    constructor(message: string, opts: { status: number; code?: number; details?: unknown; path?: string; raw?: unknown; retryable?: boolean }) {
         super(message);
         this.name = 'ApiError';
         this.status = opts.status;
@@ -13,6 +14,7 @@ export class ApiError extends Error {
         this.details = opts.details;
         this.path = opts.path;
         this.raw = opts.raw;
+        this.retryable = opts.retryable;
     }
 }
 
@@ -39,7 +41,8 @@ async function parseError(res: Response): Promise<ApiError> {
     const code = typeof errObj?.code === 'number' ? errObj.code : undefined;
     const details = errObj?.details;
     const path = errObj?.path;
-    return new ApiError(message, { status: res.status, code, details, path, raw: body });
+    const retryable = typeof errObj?.retryable === 'boolean' ? errObj.retryable : undefined;
+    return new ApiError(message, { status: res.status, code, details, path, raw: body, retryable });
 }
 
 /** Ensure response is ok, otherwise throw ApiError with parsed backend payload. */

@@ -163,6 +163,8 @@ export const ensureTransformedWorklet = (input: WorkletPayload): TransformedWork
             infrastructure_requirements: normalizeStringAttribute(input.infrastructure_requirements),
             tech_stack: normalizeStringAttribute(input.tech_stack),
             milestones: normalizeObjectAttribute(input.milestones),
+            budget_estimation: normalizeObjectAttribute((input as any).budget_estimation),
+            risk_assessment: normalizeObjectAttribute((input as any).risk_assessment),
             references: Array.isArray(input.references) ? input.references : [],
         };
     }
@@ -182,6 +184,8 @@ export const ensureTransformedWorklet = (input: WorkletPayload): TransformedWork
         infrastructure_requirements: wrapString(legacy.infrastructure_requirements),
         tech_stack: wrapString(legacy.tech_stack),
         milestones: wrapObject(legacy.milestones),
+        budget_estimation: wrapObject(legacy.budget_estimation),
+        risk_assessment: wrapObject(legacy.risk_assessment),
         references: Array.isArray(legacy.references) ? legacy.references : [],
     };
 };

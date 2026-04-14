@@ -46,6 +46,8 @@ class Worklet(BaseModel):
         ..., description="Tentative technology stack for the project idea"
     )
     milestones: dict = Field(..., description="Milestones for the project idea")
+    budget_estimation: dict = Field(default_factory=dict, description="Budget estimation breakdown")
+    risk_assessment: dict = Field(default_factory=dict, description="Risk assessment")
 
 
 class WebSearchQueryResult(BaseModel):
@@ -68,6 +70,7 @@ class ReferenceKeywordResult(BaseModel):
         ...,
         description="The generated keyword or phrase for searching relevant GitHub repositories",
     )
+    patent_keyword: str = Field("", description="Keyword for patent search on Google Patents")
 
 
 class ReferenceSortingResult(BaseModel):

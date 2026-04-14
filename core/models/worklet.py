@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class Reference(BaseModel):
@@ -14,6 +14,9 @@ class Reference(BaseModel):
         ...,
         description="Tag indicating the source of the reference, e.g., 'google', 'scholar'",
     )
+    citation_count: Optional[int] = Field(None, description="Number of citations or stars")
+    published_year: Optional[int] = Field(None, description="Publication year")
+    quality_score: Optional[float] = Field(None, description="Computed quality score 0-1")
 
 
 class Worklet(BaseModel):
@@ -50,6 +53,14 @@ class Worklet(BaseModel):
     )
     milestones: dict = Field(
         ..., description="Milestones for the project idea over a 6-month period"
+    )
+    budget_estimation: dict = Field(
+        default_factory=dict,
+        description="Budget estimation breakdown",
+    )
+    risk_assessment: dict = Field(
+        default_factory=dict,
+        description="Risk assessment with risks and mitigations",
     )
     references: List[Reference] = Field(
         ...,
@@ -109,6 +120,14 @@ class TransformedWorklet(BaseModel):
     )
     milestones: ObjectAttribute = Field(
         ..., description="Transformed milestones attribute"
+    )
+    budget_estimation: ObjectAttribute = Field(
+        default_factory=lambda: ObjectAttribute(selected_index=0, iterations=[{}]),
+        description="Transformed budget estimation attribute",
+    )
+    risk_assessment: ObjectAttribute = Field(
+        default_factory=lambda: ObjectAttribute(selected_index=0, iterations=[{}]),
+        description="Transformed risk assessment attribute",
     )
     references: List[Reference] = Field(
         ...,

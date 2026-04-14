@@ -52,6 +52,8 @@ class IterateRequest(BaseModel):
         "infrastructure_requirements",
         "tech_stack",
         "milestones",
+        "budget_estimation",
+        "risk_assessment",
     ]
     index: int = Field(
         ..., ge=0, description="Existing iteration index to seed the update"
@@ -277,8 +279,12 @@ async def iterate_worklet(payload: IterateRequest):
     if new_value is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=last_error_detail
-            or "Iteration model failed to produce a valid response after multiple attempts.",
+            detail={
+                "code": "LLM_FAILURE",
+                "message": last_error_detail
+                or "Iteration model failed to produce a valid response after multiple attempts.",
+                "retryable": True,
+            },
         )
 
     existing_iterations = field_payload.get("iterations", [])

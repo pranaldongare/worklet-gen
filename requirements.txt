@@ -35,3 +35,4 @@ xlrd
 openpyxl
 tabulate
 olefile
+scikit-learn

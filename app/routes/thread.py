@@ -4,7 +4,7 @@ import io, zipfile
 import unicodedata
 import re
 from urllib.parse import quote
-from core.models.worklet import Worklet
+from core.models.worklet import Reference, Worklet
 from core.utils.generate_files import create_pdf, create_ppt
 from core.utils.worklet_store import iteration_to_worklet
 from core.utils.sanitize_filename import sanitize_filename
@@ -309,3 +309,32 @@ async def download_worklet(thread_id: str, worklet_id: str, file_type: str):
         media_type=media_type,
         headers={"Content-Disposition": _content_disposition(download_name)},
     )
+
+
+@router.get("/{thread_id}/worklet/{worklet_id}/reference-graph")
+async def get_reference_graph(thread_id: str, worklet_id: str):
+    from core.utils.reference_graph import build_reference_graph
+    from core.utils.worklet_store import iteration_to_worklet
+
+    thread = db.threads.find_one(
+        {"thread_id": thread_id, "worklets.worklet_id": worklet_id},
+        {"worklets.$": 1},
+    )
+    if not thread:
+        raise HTTPException(status_code=404, detail="Worklet not found.")
+
+    worklet_record = thread["worklets"][0]
+    iterations = worklet_record.get("iterations", [])
+    selected_idx = worklet_record.get("selected_iteration_index", 0)
+    if not iterations:
+        raise HTTPException(status_code=404, detail="No iterations found.")
+
+    iteration = iterations[min(selected_idx, len(iterations) - 1)]
+    worklet = iteration_to_worklet(iteration)
+    references = [
+        Reference(**r) if isinstance(r, dict) else r
+        for r in iteration.get("references", [])
+    ]
+
+    graph = build_reference_graph(references, worklet.title)
+    return graph

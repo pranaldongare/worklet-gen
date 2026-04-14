@@ -1,15 +1,28 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
+  DollarSign,
   Download,
   FileIcon,
   Loader2,
   Pencil,
+  PenLine,
+  Plus,
+  ScrollText,
+  ShieldAlert,
+  Star,
+  X,
 } from 'lucide-react';
+import { ReferenceGraph } from '@/components/ReferenceGraph';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrayAttribute,
   EnhanceWorkletResponse,
@@ -91,6 +104,8 @@ const FIELD_CONFIGS: FieldConfig[] = [
   },
   { key: 'tech_stack', label: 'Tech Stack', type: 'string' },
   { key: 'milestones', label: 'Milestones', type: 'object' },
+  { key: 'budget_estimation', label: 'Budget Estimation', type: 'object' },
+  { key: 'risk_assessment', label: 'Risk Assessment', type: 'object' },
 ];
 
 const DEFAULT_FIELD_PROMPT_STATE = {
@@ -126,6 +141,18 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
   const [enhancePrompt, setEnhancePrompt] = useState('');
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [defaultSelecting, setDefaultSelecting] = useState(false);
+  const [operationError, setOperationError] = useState<{
+    field?: WorkletFieldKey;
+    operation: string;
+    message: string;
+    retryable: boolean;
+    retryFn: (() => void) | null;
+  } | null>(null);
+  const [editingField, setEditingField] = useState<WorkletFieldKey | null>(null);
+  const [editValue, setEditValue] = useState<any>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [generatingField, setGeneratingField] = useState<string | null>(null);
+  const [referenceFilter, setReferenceFilter] = useState<string>('all');
 
   const activeWorklet = useMemo(
     () => worklets.find((w) => w.worklet_id === activeWorkletId) ?? null,
@@ -376,11 +403,17 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
       setFieldPromptState(DEFAULT_FIELD_PROMPT_STATE);
     } catch (error) {
       console.error(error);
-      if (error instanceof ApiError) {
-        toast.error(error.message ?? 'Iteration failed');
-      } else {
-        toast.error(error instanceof Error ? error.message : 'Iteration failed');
-      }
+      const apiErr = error instanceof ApiError ? error : null;
+      const message = apiErr?.message ?? (error instanceof Error ? error.message : 'Iteration failed');
+      const retryable = apiErr?.retryable ?? true;
+      setOperationError({
+        field: fieldPromptState.field!,
+        operation: 'iterate',
+        message,
+        retryable,
+        retryFn: retryable ? () => handleFieldPromptSubmit() : null,
+      });
+      toast.error(message);
     } finally {
       setIteratingField(null);
     }
@@ -470,13 +503,118 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
       toast.success('Worklet enhanced');
     } catch (error) {
       console.error(error);
-      if (error instanceof ApiError) {
-        toast.error(error.message ?? 'Enhancement failed');
-      } else {
-        toast.error(error instanceof Error ? error.message : 'Enhancement failed');
-      }
+      const apiErr = error instanceof ApiError ? error : null;
+      const message = apiErr?.message ?? (error instanceof Error ? error.message : 'Enhancement failed');
+      const retryable = apiErr?.retryable ?? true;
+      setOperationError({
+        operation: 'enhance',
+        message,
+        retryable,
+        retryFn: retryable ? () => handleEnhanceSubmit() : null,
+      });
+      toast.error(message);
     } finally {
       setIsEnhancing(false);
+    }
+  };
+
+  const handleStartEdit = (field: WorkletFieldKey) => {
+    if (!activeIteration) return;
+    const viewIndex = getViewIndex(field);
+    const fieldConfig = FIELD_CONFIGS.find((f) => f.key === field);
+    if (!fieldConfig) return;
+
+    if (fieldConfig.type === 'array') {
+      setEditValue([...getArrayIteration(getAttribute(activeIteration, field) as ArrayAttribute, viewIndex)]);
+    } else if (fieldConfig.type === 'object') {
+      setEditValue({ ...getObjectIteration(getAttribute(activeIteration, field) as ObjectAttribute, viewIndex) });
+    } else {
+      setEditValue(getStringIteration(getAttribute(activeIteration, field) as StringAttribute, viewIndex));
+    }
+    setEditingField(field);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingField(null);
+    setEditValue(null);
+  };
+
+  const handleSaveEdit = async (field: WorkletFieldKey) => {
+    if (!activeWorklet || !activeIteration || editValue == null) return;
+    setIsSavingEdit(true);
+    try {
+      const response = await requestJson<IterateWorkletResponse>(`${API_URL}/manual-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          worklet_id: activeWorklet.worklet_id,
+          worklet_iteration_id: activeIteration.iteration_id,
+          field,
+          value: editValue,
+        }),
+      });
+
+      const attr = getAttribute(activeIteration, field);
+      const updatedIteration: WorkletIteration = {
+        ...activeIteration,
+        [field]: { ...attr, selected_index: response.selected_index, iterations: response.iterations as any },
+      };
+      const updatedWorklet = ensureWorkletBundle({
+        ...activeWorklet,
+        iterations: activeWorklet.iterations.map((it) =>
+          it.iteration_id === activeIteration.iteration_id ? updatedIteration : it,
+        ),
+      });
+      onUpdateWorklet(updatedWorklet);
+      setFieldViewIndices((prev) => ({ ...prev, [field]: response.selected_index }));
+      toast.success('Edit saved');
+      setEditingField(null);
+      setEditValue(null);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof ApiError ? error.message : 'Save failed');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleGenerateField = async (field: 'budget_estimation' | 'risk_assessment') => {
+    if (!activeWorklet || !activeIteration) return;
+    setGeneratingField(field);
+    try {
+      const endpoint = field === 'budget_estimation' ? 'generate-budget' : 'generate-risk';
+      const response = await requestJson<IterateWorkletResponse>(
+        `${API_URL}/worklet-iterations/${endpoint}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            worklet_id: activeWorklet.worklet_id,
+            worklet_iteration_id: activeIteration.iteration_id,
+          }),
+        },
+      );
+
+      const attr = getAttribute(activeIteration, field);
+      const updatedIteration: WorkletIteration = {
+        ...activeIteration,
+        [field]: { ...attr, selected_index: response.selected_index, iterations: response.iterations as any },
+      };
+      const updatedWorklet = ensureWorkletBundle({
+        ...activeWorklet,
+        iterations: activeWorklet.iterations.map((it) =>
+          it.iteration_id === activeIteration.iteration_id ? updatedIteration : it,
+        ),
+      });
+      onUpdateWorklet(updatedWorklet);
+      setFieldViewIndices((prev) => ({ ...prev, [field]: response.selected_index }));
+      toast.success(`${field === 'budget_estimation' ? 'Budget' : 'Risk assessment'} generated`);
+    } catch (error) {
+      console.error(error);
+      const apiErr = error instanceof ApiError ? error : null;
+      toast.error(apiErr?.message ?? 'Generation failed');
+    } finally {
+      setGeneratingField(null);
     }
   };
 
@@ -583,6 +721,25 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
                   onClick={() => handleOpenWorklet(worklet)}
                 >
                   <FileIcon className="mr-2 h-4 w-4" />
+                  {thread.similarity_data?.some(
+                    (s) => s.worklet_a_id === worklet.worklet_id || s.worklet_b_id === worklet.worklet_id
+                  ) && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <AlertTriangle className="mr-1 h-4 w-4 text-amber-500 shrink-0" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Similar to: {
+                            thread.similarity_data
+                              ?.filter((s) => s.worklet_a_id === worklet.worklet_id || s.worklet_b_id === worklet.worklet_id)
+                              .map((s) => s.worklet_a_id === worklet.worklet_id ? s.worklet_b_title : s.worklet_a_title)
+                              .join(', ')
+                          }</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                   <span className="text-left [overflow-wrap:anywhere]">
                     {buttonTitle}
                   </span>
@@ -690,13 +847,122 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
                     const isSelected = total > 0 && viewIndex === selectedIndex;
                     const showSelect = total > 0 && !isSelected;
 
+                    // Skip empty budget/risk fields
+                    if ((field.key === 'budget_estimation' || field.key === 'risk_assessment') && total <= 1) {
+                      const objVal = getObjectIteration(attr as ObjectAttribute, 0);
+                      if (Object.keys(objVal).length === 0) {
+                        // Show generate button only
+                        return (
+                          <section key={field.key} className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-semibold text-foreground">{field.label}</h4>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => handleGenerateField(field.key as 'budget_estimation' | 'risk_assessment')}
+                                disabled={generatingField !== null}
+                              >
+                                {generatingField === field.key ? (
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                ) : field.key === 'budget_estimation' ? (
+                                  <DollarSign className="mr-1 h-3 w-3" />
+                                ) : (
+                                  <ShieldAlert className="mr-1 h-3 w-3" />
+                                )}
+                                Generate
+                              </Button>
+                            </div>
+                          </section>
+                        );
+                      }
+                    }
+
                     let content: ReactNode;
-                    if (field.type === 'array') {
+                    const isFieldEditing = editingField === field.key;
+
+                    if (isFieldEditing) {
+                      if (field.type === 'array') {
+                        const arrVal = Array.isArray(editValue) ? editValue : [];
+                        content = (
+                          <div className="space-y-2">
+                            {arrVal.map((item: string, idx: number) => (
+                              <div key={idx} className="flex items-center gap-2">
+                                <Input
+                                  value={item}
+                                  onChange={(e) => {
+                                    const updated = [...arrVal];
+                                    updated[idx] = e.target.value;
+                                    setEditValue(updated);
+                                  }}
+                                  className="flex-1"
+                                />
+                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
+                                  onClick={() => setEditValue(arrVal.filter((_: any, i: number) => i !== idx))}>
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                            <Button type="button" variant="outline" size="sm"
+                              onClick={() => setEditValue([...arrVal, ''])}>
+                              <Plus className="mr-1 h-3 w-3" /> Add item
+                            </Button>
+                          </div>
+                        );
+                      } else if (field.type === 'object') {
+                        const objVal = typeof editValue === 'object' && editValue ? editValue : {};
+                        const entries = Object.entries(objVal);
+                        content = (
+                          <div className="space-y-2">
+                            {entries.map(([k, v], idx) => (
+                              <div key={idx} className="flex items-center gap-2">
+                                <Input value={k} className="w-1/3"
+                                  onChange={(e) => {
+                                    const newObj: Record<string, unknown> = {};
+                                    entries.forEach(([ek, ev], ei) => {
+                                      newObj[ei === idx ? e.target.value : ek] = ev;
+                                    });
+                                    setEditValue(newObj);
+                                  }} />
+                                <Input value={typeof v === 'string' ? v : JSON.stringify(v)} className="flex-1"
+                                  onChange={(e) => {
+                                    setEditValue({ ...objVal, [k]: e.target.value });
+                                  }} />
+                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
+                                  onClick={() => {
+                                    const { [k]: _, ...rest } = objVal;
+                                    setEditValue(rest);
+                                  }}>
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                            <Button type="button" variant="outline" size="sm"
+                              onClick={() => setEditValue({ ...objVal, '': '' })}>
+                              <Plus className="mr-1 h-3 w-3" /> Add entry
+                            </Button>
+                          </div>
+                        );
+                      } else {
+                        content = (
+                          <Textarea value={typeof editValue === 'string' ? editValue : ''}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            className="min-h-[100px]" />
+                        );
+                      }
+                    } else if (field.type === 'array') {
                       const values = getArrayIteration(attr as ArrayAttribute, viewIndex);
                       content = <ArrayContent values={values} />;
                     } else if (field.type === 'object') {
                       const values = getObjectIteration(attr as ObjectAttribute, viewIndex);
-                      content = <MilestonesContent milestones={values} />;
+                      if (field.key === 'budget_estimation') {
+                        content = <BudgetContent budget={values} />;
+                      } else if (field.key === 'risk_assessment') {
+                        content = <RiskAssessmentContent data={values} />;
+                      } else {
+                        content = <MilestonesContent milestones={values} />;
+                      }
                     } else {
                       const value = getStringIteration(attr as StringAttribute, viewIndex);
                       content = <StringContent value={value} />;
@@ -763,6 +1029,36 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => editingField === field.key ? handleCancelEdit() : handleStartEdit(field.key)}
+                            disabled={isIterating || isEnhancing || isSavingEdit}
+                            aria-label={editingField === field.key ? `Cancel edit ${field.label}` : `Edit ${field.label}`}
+                          >
+                            <PenLine className="h-4 w-4" />
+                          </Button>
+                          {(field.key === 'budget_estimation' || field.key === 'risk_assessment') && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => handleGenerateField(field.key as 'budget_estimation' | 'risk_assessment')}
+                              disabled={isIterating || isEnhancing || generatingField !== null}
+                            >
+                              {generatingField === field.key ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : field.key === 'budget_estimation' ? (
+                                <DollarSign className="mr-1 h-3 w-3" />
+                              ) : (
+                                <ShieldAlert className="mr-1 h-3 w-3" />
+                              )}
+                              Generate
+                            </Button>
+                          )}
                           {isSelected && (
                             <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                               Selected
@@ -772,12 +1068,23 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
                         <div className="rounded border border-border bg-muted/20 p-3">
                           {content}
                         </div>
+                        {isFieldEditing && (
+                          <div className="flex justify-end gap-2 pt-2">
+                            <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                              Cancel
+                            </Button>
+                            <Button type="button" size="sm" onClick={() => handleSaveEdit(field.key)} disabled={isSavingEdit}>
+                              {isSavingEdit ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                              Save
+                            </Button>
+                          </div>
+                        )}
                       </section>
                     );
                   })}
 
                   <ReasoningField reasoning={activeIteration.reasoning} />
-                  <ReferencesField references={activeIteration.references} />
+                  <ReferencesField references={activeIteration.references} filter={referenceFilter} onFilterChange={setReferenceFilter} threadId={thread.thread_id} workletId={activeWorklet.worklet_id} />
                 </div>
               </ScrollArea>
               <div className="flex justify-end gap-2 pt-2">
@@ -814,6 +1121,19 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
               className="min-h-[120px]"
             />
           </div>
+            {operationError && operationError.operation === 'iterate' && (
+              <div className="rounded border border-destructive/50 bg-destructive/10 p-3 text-sm">
+                <p className="text-destructive">{operationError.message}</p>
+                <div className="mt-2 flex gap-2">
+                  {operationError.retryable && operationError.retryFn && (
+                    <Button size="sm" variant="outline" onClick={() => { setOperationError(null); operationError.retryFn!(); }}>
+                      Retry
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => setOperationError(null)}>Dismiss</Button>
+                </div>
+              </div>
+            )}
           <div className="flex justify-end gap-2 pt-4">
             <Button
               type="button"
@@ -859,6 +1179,19 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
               className="min-h-[140px]"
             />
           </div>
+            {operationError && operationError.operation === 'enhance' && (
+              <div className="rounded border border-destructive/50 bg-destructive/10 p-3 text-sm">
+                <p className="text-destructive">{operationError.message}</p>
+                <div className="mt-2 flex gap-2">
+                  {operationError.retryable && operationError.retryFn && (
+                    <Button size="sm" variant="outline" onClick={() => { setOperationError(null); operationError.retryFn!(); }}>
+                      Retry
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => setOperationError(null)}>Dismiss</Button>
+                </div>
+              </div>
+            )}
           <div className="flex justify-end gap-2 pt-4">
             <Button
               type="button"
@@ -956,36 +1289,204 @@ const ReasoningField = ({ reasoning }: { reasoning: string }) => {
   );
 };
 
-const ReferencesField = ({ references }: { references: WorkletIteration['references'] }) => {
+const BudgetContent = ({ budget }: { budget: Record<string, unknown> }) => {
+  if (!budget || Object.keys(budget).length === 0) {
+    return <p className="text-sm text-muted-foreground">No budget estimation yet. Click "Generate" to create one.</p>;
+  }
+
+  const renderSection = (title: string, data: unknown) => {
+    if (!data || typeof data !== 'object') return null;
+    const entries = Object.entries(data as Record<string, unknown>);
+    if (entries.length === 0) return null;
+    return (
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        {entries.map(([k, v]) => (
+          <div key={k} className="flex justify-between text-sm">
+            <span>{k}</span>
+            <span className="font-mono text-muted-foreground">{String(v)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      {renderSection('Infrastructure Costs', budget.infrastructure_costs)}
+      {renderSection('Team Costs', budget.team_costs)}
+      {renderSection('Tool Costs', budget.tool_costs)}
+      {budget.total_estimated && (
+        <div className="rounded bg-primary/10 p-2 text-center">
+          <p className="text-xs text-muted-foreground">Total Estimated</p>
+          <p className="font-semibold text-primary">{String(budget.total_estimated)}</p>
+        </div>
+      )}
+      {Array.isArray(budget.assumptions) && budget.assumptions.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assumptions</p>
+          <ul className="list-disc pl-4 text-sm">
+            {(budget.assumptions as string[]).map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RiskAssessmentContent = ({ data }: { data: Record<string, unknown> }) => {
+  const risks = Array.isArray(data?.risks) ? data.risks : [];
+  if (risks.length === 0) {
+    return <p className="text-sm text-muted-foreground">No risk assessment yet. Click "Generate" to create one.</p>;
+  }
+
+  const levelColor = (level: string) => {
+    switch (level?.toLowerCase()) {
+      case 'high': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+      case 'medium': return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200';
+      case 'low': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+      default: return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <th className="pb-2 pr-3">Risk</th>
+            <th className="pb-2 pr-3">Likelihood</th>
+            <th className="pb-2 pr-3">Impact</th>
+            <th className="pb-2">Mitigation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {risks.map((r: any, i: number) => (
+            <tr key={i} className="border-b border-border/50">
+              <td className="py-2 pr-3">{r.risk}</td>
+              <td className="py-2 pr-3">
+                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${levelColor(r.likelihood)}`}>
+                  {r.likelihood}
+                </span>
+              </td>
+              <td className="py-2 pr-3">
+                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${levelColor(r.impact)}`}>
+                  {r.impact}
+                </span>
+              </td>
+              <td className="py-2 text-muted-foreground">{r.mitigation}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const TAG_COLORS: Record<string, string> = {
+  scholar: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  github: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+  google: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  patent: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+};
+
+const QualityStars = ({ score }: { score: number | null | undefined }) => {
+  if (score == null) return null;
+  const stars = Math.max(1, Math.round(score * 5));
+  return (
+    <span className="inline-flex gap-0.5" title={`Quality: ${(score * 100).toFixed(0)}%`}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <Star key={i} className={`h-3 w-3 ${i < stars ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/30'}`} />
+      ))}
+    </span>
+  );
+};
+
+const ReferencesField = ({
+  references,
+  filter,
+  onFilterChange,
+  threadId,
+  workletId,
+}: {
+  references: WorkletIteration['references'];
+  filter: string;
+  onFilterChange: (f: string) => void;
+  threadId: string;
+  workletId: string;
+}) => {
   if (!references || references.length === 0) {
     return null;
   }
+
+  const tags = ['all', ...Array.from(new Set(references.map((r) => r.tag)))];
+  const filtered = filter === 'all' ? references : references.filter((r) => r.tag === filter);
+
   return (
     <section className="space-y-2">
       <h4 className="text-sm font-semibold text-foreground">References</h4>
-      <div className="space-y-3">
-        {references.map((reference) => (
-          <article
-            key={`${reference.link}-${reference.title}`}
-            className="rounded border border-border bg-background p-3"
-          >
-            <a
-              href={reference.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-primary hover:underline"
-            >
-              {reference.title}
-            </a>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {normalizeWrapText(reference.description)}
-            </p>
-            <span className="mt-2 inline-block rounded bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {reference.tag}
-            </span>
-          </article>
-        ))}
-      </div>
+      <Tabs defaultValue="list" className="w-full">
+        <TabsList className="h-8">
+          <TabsTrigger value="list" className="text-xs">List</TabsTrigger>
+          <TabsTrigger value="graph" className="text-xs">Graph</TabsTrigger>
+        </TabsList>
+        <TabsContent value="list">
+          <div className="flex flex-wrap gap-1 mb-2">
+            {tags.map((tag) => (
+              <Button
+                key={tag}
+                type="button"
+                variant={filter === tag ? 'default' : 'outline'}
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => onFilterChange(tag)}
+              >
+                {tag === 'all' ? 'All' : tag.charAt(0).toUpperCase() + tag.slice(1)}
+              </Button>
+            ))}
+          </div>
+          <div className="space-y-3">
+            {filtered.map((reference) => (
+              <article
+                key={`${reference.link}-${reference.title}`}
+                className="rounded border border-border bg-background p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <a
+                    href={reference.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {reference.tag === 'patent' && <ScrollText className="inline mr-1 h-3.5 w-3.5" />}
+                    {reference.title}
+                  </a>
+                  <QualityStars score={reference.quality_score} />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {normalizeWrapText(reference.description)}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${TAG_COLORS[reference.tag] || 'bg-muted text-muted-foreground'}`}>
+                    {reference.tag}
+                  </span>
+                  {reference.citation_count != null && reference.citation_count > 0 && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {reference.citation_count} {reference.tag === 'github' ? 'stars' : 'citations'}
+                    </span>
+                  )}
+                  {reference.published_year != null && (
+                    <span className="text-[10px] text-muted-foreground">{reference.published_year}</span>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </TabsContent>
+        <TabsContent value="graph">
+          <ReferenceGraph threadId={threadId} workletId={workletId} />
+        </TabsContent>
+      </Tabs>
     </section>
   );
 };
