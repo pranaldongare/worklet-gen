@@ -308,3 +308,15 @@ _ensure_collection(
         lambda: db.clusters.create_index("name"),
     ],
 )
+
+# Deep Research collection (no schema validation — flexible document structure)
+try:
+    db.create_collection("deep_research")
+    print("Collection 'deep_research' created.")
+except CollectionInvalid:
+    pass
+except Exception as exc:
+    print(f"Warning: deep_research collection init: {exc}")
+
+db.deep_research.create_index("research_id", unique=True)
+db.deep_research.create_index([("thread_id", 1), ("worklet_id", 1)])

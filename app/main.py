@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.routes import (
     cluster,
+    deep_research,
     generate,
     health,
     iterate,
@@ -87,5 +88,6 @@ fastapi_app.include_router(iterate.router)
 fastapi_app.include_router(select.router)
 fastapi_app.include_router(worklet_iterations.router)
 fastapi_app.include_router(manual_edit.router)
+fastapi_app.include_router(deep_research.router)
 
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)

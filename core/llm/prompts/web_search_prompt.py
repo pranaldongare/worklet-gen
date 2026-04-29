@@ -46,7 +46,7 @@ def web_search_query_planner_prompt(
                 "- Return JSON only in the schema shown below.\n"
                 "- Recommend specific, non-overlapping queries that would surface the latest benchmarks, datasets, regulations, or breakthroughs.\n"
                 "- Tailor each query so it can be executed directly on the public web (use natural phrasing, include the year when helpful).\n"
-                "- Balance between Samsung business focus, academic relevance, and implementation feasibility for Indian engineering colleges.\n"
+                "- Balance between industry relevance, academic research potential, and practical implementation feasibility.\n"
                 "- Range: Provide between 3 to 8 queries.\n"
             ),
         }

@@ -249,6 +249,9 @@ const ClustersPage = () => {
             >
               <Plus className="h-5 w-5" />
             </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/research')}>
+              Deep Research
+            </Button>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -45,10 +45,12 @@ def worklet_generation_prompt(
             "parts": (
                 "### CONSTRAINTS\n"
                 "1. **Value Proposition:** Each project must enable at least one of:\n"
-                "   - Research-focused exploration of novel solutions (not necessarily tied to immediate commercial applications)\n"
+                "   - Research-focused exploration of novel solutions is prefered (not necessarily tied to immediate commercial applications)\n"
                 "   - High-quality research publication opportunity\n"
-                "   - DO NOT give problem statements related to agriculture, manufacturing, education, retail and defence sector\n"
-                "   - Novel, patent-worthy intellectual property\n\n"
+                "   - Ensure that problem statement and title are more general\n"
+                "   - DO NOT give problem statements related to agriculture, manufacturing, education, retail, health, industrial and defence sector\n"
+                "   - DO NOT give industrial or commercial application in Title, keep it restricted to Use Cases.\n"
+                "   - Problem statements which are Novel, patent-worthy intellectual property are prefered\n\n"
                 "2. **SOTA Awareness (CRITICAL):**\n"
                 "   - Identify current State-of-the-Art methods, benchmarks, and performance metrics for the problem domain\n"
                 "   - Problem statements must explicitly aim to match or exceed current SOTA\n"
@@ -95,7 +97,7 @@ def worklet_generation_prompt(
             "role": "user",
             "parts": (
                 "Generate exactly "
-                f"{count} future-ready project worklets that maximise impact for Samsung Research Institute. "
+                f"{count} future-ready project worklets that are novel and fresh. "
                 "All recommendations must align with the constraints and incorporate the freshest insights from the approved sources."
             ),
         }

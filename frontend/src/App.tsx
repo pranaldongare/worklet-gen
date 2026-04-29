@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Clusters from "./pages/Clusters";
 import LegacyThreadRedirect from "./pages/LegacyThreadRedirect";
 import NotFound from "./pages/NotFound";
+import Research from "./pages/Research";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,8 @@ const App = () => (
             <Route path="/cluster/:clusterId/new" element={<Index />} />
             <Route path="/cluster/:clusterId/thread/:threadId" element={<Index />} />
             <Route path="/thread/:threadId" element={<LegacyThreadRedirect />} />
+            <Route path="/research" element={<Research />} />
+            <Route path="/research/:researchId" element={<Research />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -16,6 +16,7 @@ import {
   Star,
   X,
 } from 'lucide-react';
+import { DeepResearchButton } from '@/components/DeepResearchButton';
 import { ReferenceGraph } from '@/components/ReferenceGraph';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -834,6 +835,15 @@ export const ThreadDetails = ({ thread, worklets, onUpdateWorklet, clusterName }
                         <Pencil className="h-4 w-4" />
                       )}
                     </Button>
+                    {activeWorklet && activeIteration && (
+                      <DeepResearchButton
+                        threadId={thread.thread_id}
+                        workletId={activeWorklet.worklet_id}
+                        workletTitle={getStringIteration(activeIteration.title)}
+                        problemStatement={getStringIteration(activeIteration.problem_statement)}
+                        description={getStringIteration(activeIteration.description)}
+                      />
+                    )}
                   </div>
                 </div>
               </DialogHeader>
