@@ -100,6 +100,47 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
                 elements.append(Paragraph(escape(summary), normal))
                 elements.append(Spacer(1, 6))
 
+            sota_comparison = as_is.get("sota_comparison", []) or []
+            if sota_comparison:
+                elements.append(Paragraph("<b>Head-to-Head Comparison</b>", sub_header))
+                for s in sota_comparison:
+                    approach = s.get("approach", "")
+                    actor = s.get("actor", "") or ""
+                    metric = s.get("key_metric", "")
+                    best = s.get("current_best", "")
+                    strengths = s.get("strengths_one_line", "")
+                    limitations = s.get("limitations_one_line", "")
+                    source = s.get("source", "")
+                    year = s.get("year", "")
+                    actor_str = f" — {escape(str(actor))}" if actor else ""
+                    year_str = f" ({year})" if year else ""
+                    elements.append(
+                        Paragraph(
+                            f"<b>{escape(approach)}</b>{actor_str}{year_str}",
+                            normal,
+                        )
+                    )
+                    elements.append(
+                        Paragraph(f"&nbsp;&nbsp;<b>{escape(metric)}:</b> {escape(best)}", bullet)
+                    )
+                    if strengths:
+                        elements.append(Paragraph(f"&nbsp;&nbsp;+ {escape(strengths)}", bullet))
+                    if limitations:
+                        elements.append(Paragraph(f"&nbsp;&nbsp;- {escape(limitations)}", bullet))
+                    if source:
+                        if str(source).startswith("http"):
+                            elements.append(
+                                Paragraph(
+                                    f'&nbsp;&nbsp;Source: <a href="{source}" color="blue"><u>link</u></a>',
+                                    bullet,
+                                )
+                            )
+                        else:
+                            elements.append(
+                                Paragraph(f"&nbsp;&nbsp;<i>Source: {escape(str(source))}</i>", bullet)
+                            )
+                elements.append(Spacer(1, 4))
+
             findings = as_is.get("key_findings", [])
             if findings:
                 elements.append(Paragraph("<b>Key Findings</b>", sub_header))
@@ -195,7 +236,18 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
                     desc = p.get("description", "")
                     rationale = p.get("rationale", "")
                     impact = p.get("potential_impact", "")
+                    core_tech = p.get("core_technologies", []) or []
+                    research_areas = p.get("research_areas", []) or []
                     elements.append(Paragraph(f"<b>{escape(title)}</b>", normal))
+                    if core_tech or research_areas:
+                        chips = []
+                        for t in core_tech:
+                            chips.append(f"[Tech: {escape(str(t))}]")
+                        for r in research_areas:
+                            chips.append(f"[Area: {escape(str(r))}]")
+                        elements.append(
+                            Paragraph(f"<i>{' '.join(chips)}</i>", bullet)
+                        )
                     elements.append(Paragraph(escape(desc), bullet))
                     if rationale:
                         elements.append(
@@ -218,28 +270,70 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
             if questions:
                 elements.append(Paragraph("<b>Open Research Questions</b>", sub_header))
                 for i, q in enumerate(questions, 1):
-                    elements.append(Paragraph(f"{i}. {escape(str(q))}", bullet))
+                    if isinstance(q, dict):
+                        question_text = q.get("question", "")
+                        gain = q.get("expected_gain", "")
+                        criteria = q.get("success_criteria", "")
+                        elements.append(
+                            Paragraph(f"<b>{i}. {escape(question_text)}</b>", normal)
+                        )
+                        if gain:
+                            elements.append(
+                                Paragraph(f"&nbsp;&nbsp;<i>Expected gain:</i> {escape(gain)}", bullet)
+                            )
+                        if criteria:
+                            elements.append(
+                                Paragraph(f"&nbsp;&nbsp;<i>Success criteria:</i> {escape(criteria)}", bullet)
+                            )
+                    else:
+                        elements.append(Paragraph(f"{i}. {escape(str(q))}", bullet))
                 elements.append(Spacer(1, 4))
 
-        # ── References ──
+        # ── References (grouped by source) ──
         refs = doc.get("references", [])
         if refs:
             elements.append(Paragraph("References", section_style))
+            grouped: dict[str, list] = {}
             for ref in refs:
                 if isinstance(ref, dict):
-                    title = ref.get("title", "")
-                    link = ref.get("link", "")
-                    if title and link:
-                        line = f'• {escape(title)} <a href="{link}" color="blue"><u>link</u></a>'
-                    elif title:
-                        line = f"• {escape(title)}"
-                    elif link:
-                        line = f'• <a href="{link}" color="blue"><u>link</u></a>'
+                    tag = (ref.get("tag") or "web").lower()
+                else:
+                    tag = "web"
+                grouped.setdefault(tag, []).append(ref)
+
+            group_order = ["patent", "scholar", "github", "web", "google"]
+            tag_labels = {
+                "patent": "Patents",
+                "scholar": "Academic Papers",
+                "github": "GitHub Repositories",
+                "web": "Web References",
+                "google": "Web References",
+            }
+            ordered_tags = [t for t in group_order if t in grouped] + [
+                t for t in grouped if t not in group_order
+            ]
+            for tag in ordered_tags:
+                group_refs = grouped[tag]
+                label = tag_labels.get(tag, tag.title())
+                elements.append(
+                    Paragraph(f"<b>{label} ({len(group_refs)})</b>", sub_header)
+                )
+                for ref in group_refs:
+                    if isinstance(ref, dict):
+                        title = ref.get("title", "")
+                        link = ref.get("link", "")
+                        if title and link:
+                            line = f'• {escape(title)} <a href="{link}" color="blue"><u>link</u></a>'
+                        elif title:
+                            line = f"• {escape(title)}"
+                        elif link:
+                            line = f'• <a href="{link}" color="blue"><u>link</u></a>'
+                        else:
+                            line = f"• {escape(str(ref))}"
                     else:
                         line = f"• {escape(str(ref))}"
-                else:
-                    line = f"• {escape(str(ref))}"
-                elements.append(Paragraph(line, bullet))
+                    elements.append(Paragraph(line, bullet))
+                elements.append(Spacer(1, 4))
 
         if not elements:
             elements.append(Paragraph("No content available.", normal))
@@ -349,6 +443,30 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
                 _ensure_space(est + gap)
                 top = add_textbox(slide, "Summary", summary, top)
 
+            sota_comparison = as_is.get("sota_comparison", []) or []
+            if sota_comparison:
+                lines = []
+                for s in sota_comparison:
+                    approach = s.get("approach", "")
+                    actor = s.get("actor", "") or ""
+                    metric = s.get("key_metric", "")
+                    best = s.get("current_best", "")
+                    strengths = s.get("strengths_one_line", "")
+                    limitations = s.get("limitations_one_line", "")
+                    year = s.get("year", "")
+                    actor_str = f" — {actor}" if actor else ""
+                    year_str = f" ({year})" if year else ""
+                    lines.append(f"• {approach}{actor_str}{year_str}")
+                    lines.append(f"    {metric}: {best}")
+                    if strengths:
+                        lines.append(f"    + {strengths}")
+                    if limitations:
+                        lines.append(f"    - {limitations}")
+                text = "\n".join(lines)
+                est = estimate_height_wrapped_content(text)
+                _ensure_space(est + gap)
+                top = add_textbox(slide, "Head-to-Head Comparison", text, top)
+
             findings = as_is.get("key_findings", [])
             if findings:
                 lines = []
@@ -412,7 +530,15 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
                 desc = p.get("description", "")
                 rationale = p.get("rationale", "")
                 impact = p.get("potential_impact", "")
-                text = f"{desc}\nRationale: {rationale}\nPotential Impact: {impact}"
+                core_tech = p.get("core_technologies", []) or []
+                research_areas = p.get("research_areas", []) or []
+                chip_lines = []
+                if core_tech:
+                    chip_lines.append("Tech: " + ", ".join(str(t) for t in core_tech))
+                if research_areas:
+                    chip_lines.append("Areas: " + ", ".join(str(r) for r in research_areas))
+                chips_str = ("\n" + "\n".join(chip_lines)) if chip_lines else ""
+                text = f"{desc}{chips_str}\nRationale: {rationale}\nPotential Impact: {impact}"
                 est = estimate_height_wrapped_content(text)
                 _ensure_space(est + gap)
                 top = add_textbox(slide, title, text, top)
@@ -426,28 +552,64 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
 
             questions = future.get("research_questions", [])
             if questions:
-                text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+                lines = []
+                for i, q in enumerate(questions, 1):
+                    if isinstance(q, dict):
+                        question_text = q.get("question", "")
+                        gain = q.get("expected_gain", "")
+                        criteria = q.get("success_criteria", "")
+                        lines.append(f"{i}. {question_text}")
+                        if gain:
+                            lines.append(f"    Expected gain: {gain}")
+                        if criteria:
+                            lines.append(f"    Success criteria: {criteria}")
+                    else:
+                        lines.append(f"{i}. {q}")
+                text = "\n".join(lines)
                 est = estimate_height_wrapped_content(text)
                 _ensure_space(est + gap)
                 top = add_textbox(slide, "Open Research Questions", text, top)
 
-        # ── References ──
+        # ── References (grouped by source) ──
         refs = doc.get("references", [])
         if refs:
             _ensure_space(0.7)
             top = _ppt_add_section_heading(slide, "References", top, gap)
-            lines = []
+
+            grouped: dict[str, list] = {}
             for ref in refs:
                 if isinstance(ref, dict):
-                    title = ref.get("title", "")
-                    link = ref.get("link", "")
-                    lines.append(f"• {title}" + (f" — {link}" if link else ""))
+                    tag = (ref.get("tag") or "web").lower()
                 else:
-                    lines.append(f"• {ref}")
-            text = "\n".join(lines)
-            est = estimate_height_wrapped_content(text)
-            _ensure_space(est + gap)
-            top = add_textbox(slide, "References", text, top)
+                    tag = "web"
+                grouped.setdefault(tag, []).append(ref)
+
+            group_order = ["patent", "scholar", "github", "web", "google"]
+            tag_labels = {
+                "patent": "Patents",
+                "scholar": "Academic Papers",
+                "github": "GitHub Repositories",
+                "web": "Web References",
+                "google": "Web References",
+            }
+            ordered_tags = [t for t in group_order if t in grouped] + [
+                t for t in grouped if t not in group_order
+            ]
+            for tag in ordered_tags:
+                group_refs = grouped[tag]
+                label = tag_labels.get(tag, tag.title())
+                lines = []
+                for ref in group_refs:
+                    if isinstance(ref, dict):
+                        title = ref.get("title", "")
+                        link = ref.get("link", "")
+                        lines.append(f"• {title}" + (f" — {link}" if link else ""))
+                    else:
+                        lines.append(f"• {ref}")
+                text = "\n".join(lines)
+                est = estimate_height_wrapped_content(text)
+                _ensure_space(est + gap)
+                top = add_textbox(slide, f"{label} ({len(group_refs)})", text, top)
 
         if in_memory:
             buf = io.BytesIO()

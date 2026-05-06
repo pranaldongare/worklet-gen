@@ -42,9 +42,26 @@ class KeyPlayer(BaseModel):
     link: Optional[str] = Field(None, description="URL to their work or profile")
 
 
+class SotaApproach(BaseModel):
+    """A single approach in a side-by-side SOTA comparison row."""
+
+    approach: str = Field(..., description="Name of the approach, method, or system")
+    actor: Optional[str] = Field(None, description="Who built/proposed it (person, company, institution)")
+    key_metric: str = Field(..., description="The metric used to judge quality (e.g., latency, accuracy, throughput)")
+    current_best: str = Field(..., description="The reported value for this approach (with units), e.g., '142ms p95' or '78.4 mAP'")
+    strengths_one_line: str = Field(..., description="What this approach is best at, in one short line")
+    limitations_one_line: str = Field(..., description="Where it falls short relative to others, in one short line")
+    source: str = Field(..., description="URL or paper title backing the number")
+    year: Optional[int] = Field(None, description="Year of the result")
+
+
 class AsIsSynthesisResult(BaseModel):
     summary: str = Field(
-        ..., description="200-300 word overview of the current state of the art"
+        ..., description="100-150 word lead-in (NOT a long descriptive paragraph). Sets context for the comparison table that follows."
+    )
+    sota_comparison: List[SotaApproach] = Field(
+        default_factory=list,
+        description="Head-to-head comparison of 4-8 leading approaches. Each row uses the SAME key_metric where possible so they can be ranked. This is the primary artifact of the SOTA section.",
     )
     key_findings: List[KeyFinding] = Field(
         ..., description="Top findings with sources"
@@ -93,6 +110,26 @@ class FutureProblem(BaseModel):
     potential_impact: str = Field(
         ..., description="What solving this would enable"
     )
+    core_technologies: List[str] = Field(
+        default_factory=list,
+        description="Specific technologies from the entities list this problem builds on. MUST be drawn from the provided entities.technologies — do not invent new ones.",
+    )
+    research_areas: List[str] = Field(
+        default_factory=list,
+        description="Specific research areas from the entities list this problem sits in. MUST be drawn from the provided entities.research_areas.",
+    )
+
+
+class ResearchQuestion(BaseModel):
+    question: str = Field(..., description="The open research question, phrased as a clear question")
+    expected_gain: str = Field(
+        ...,
+        description="If solved, what concrete improvement or gain is expected — quantified where possible (e.g., 'reduce p99 latency by 30-40%', 'enable on-device inference under 50MB')",
+    )
+    success_criteria: str = Field(
+        ...,
+        description="How would you know this question has been answered? A measurable signal or experiment that confirms a positive answer.",
+    )
 
 
 class FutureDirectionsResult(BaseModel):
@@ -102,8 +139,8 @@ class FutureDirectionsResult(BaseModel):
     opportunities: List[str] = Field(
         ..., description="High-level opportunity areas"
     )
-    research_questions: List[str] = Field(
-        ..., description="Open questions worth exploring"
+    research_questions: List[ResearchQuestion] = Field(
+        ..., description="Open research questions, each with expected gain and success criteria"
     )
 
 

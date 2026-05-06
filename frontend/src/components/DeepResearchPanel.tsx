@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ExternalLink, Loader2, AlertCircle, GitBranch, Star, Calendar, User, Building2, GraduationCap, Cpu, FlaskConical, Lightbulb, Target, Download, Sparkles, Eye, FileText, ChevronRight } from 'lucide-react';
+import { X, ExternalLink, Loader2, AlertCircle, GitBranch, Star, Calendar, User, Building2, GraduationCap, Cpu, FlaskConical, Lightbulb, Target, Download, Sparkles, Eye, FileText, ChevronRight, BookOpen, TrendingUp } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
@@ -19,7 +19,9 @@ import type {
   ComparativeAnalysis,
   FutureDirections,
   DetailedProblemStatement,
+  ResearchQuestion,
 } from '@/types/deep-research';
+import type { Reference } from '@/types/thread';
 
 interface DeepResearchPanelProps {
   researchId: string;
@@ -36,6 +38,7 @@ export const DeepResearchPanel = ({ researchId, open, onClose, inline = false }:
   const [asIs, setAsIs] = useState<AsIsSynthesis | null>(null);
   const [comparative, setComparative] = useState<ComparativeAnalysis | null>(null);
   const [future, setFuture] = useState<FutureDirections | null>(null);
+  const [references, setReferences] = useState<Reference[]>([]);
   const [detailedProblems, setDetailedProblems] = useState<Record<string, DetailedProblemStatement> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<'pdf' | 'pptx' | null>(null);
@@ -54,6 +57,7 @@ export const DeepResearchPanel = ({ researchId, open, onClose, inline = false }:
         if (data.as_is) setAsIs(data.as_is);
         if (data.comparative) setComparative(data.comparative);
         if (data.future) setFuture(data.future);
+        if (data.references) setReferences(data.references);
         if (data.detailed_problems) setDetailedProblems(data.detailed_problems);
         setStatus(data.status);
         if (data.status === 'completed') {
@@ -258,6 +262,11 @@ export const DeepResearchPanel = ({ researchId, open, onClose, inline = false }:
             <SectionSkeleton title="Performing comparative analysis..." />
           ) : null}
 
+          {/* Patents & References (grouped by source) */}
+          {references.length > 0 && (
+            <ReferencesSection references={references} />
+          )}
+
           {/* Future */}
           {future ? (
             <FutureSection
@@ -367,6 +376,64 @@ const AsIsSection = ({ data }: { data: AsIsSynthesis }) => (
 
     {/* Summary */}
     <p className="text-sm leading-relaxed">{data.summary}</p>
+
+    {/* SOTA Comparison Table */}
+    {data.sota_comparison && data.sota_comparison.length > 0 && (
+      <>
+        <Separator />
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium flex items-center gap-1.5">
+            <TrendingUp className="h-4 w-4 text-primary" /> Head-to-Head Comparison
+          </h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left p-2 font-medium">Approach</th>
+                  <th className="text-left p-2 font-medium">Actor</th>
+                  <th className="text-left p-2 font-medium">Metric</th>
+                  <th className="text-left p-2 font-medium">Best</th>
+                  <th className="text-left p-2 font-medium">Strength</th>
+                  <th className="text-left p-2 font-medium">Limitation</th>
+                  <th className="text-left p-2 font-medium">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sota_comparison.map((s, i) => (
+                  <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
+                    <td className="p-2 font-medium">
+                      {s.approach}
+                      {s.year && <span className="text-muted-foreground ml-1">({s.year})</span>}
+                    </td>
+                    <td className="p-2 text-muted-foreground">{s.actor || '—'}</td>
+                    <td className="p-2 text-muted-foreground">{s.key_metric}</td>
+                    <td className="p-2 font-mono text-primary">{s.current_best}</td>
+                    <td className="p-2 text-green-500">{s.strengths_one_line}</td>
+                    <td className="p-2 text-orange-500">{s.limitations_one_line}</td>
+                    <td className="p-2">
+                      {s.source && s.source.startsWith('http') ? (
+                        <a
+                          href={s.source}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-primary inline-flex items-center"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground italic truncate block max-w-[120px]" title={s.source}>
+                          {s.source}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>
+    )}
 
     <Separator />
 
@@ -538,6 +605,109 @@ const ComparativeSection = ({ data }: { data: ComparativeAnalysis }) => (
   </Card>
 );
 
+const ReferencesSection = ({ references }: { references: Reference[] }) => {
+  const grouped: Record<string, Reference[]> = {};
+  for (const ref of references) {
+    const tag = (ref.tag || 'web').toLowerCase();
+    if (!grouped[tag]) grouped[tag] = [];
+    grouped[tag].push(ref);
+  }
+
+  const groupOrder = ['patent', 'scholar', 'github', 'web', 'google'];
+  const orderedTags = [
+    ...groupOrder.filter((t) => grouped[t]),
+    ...Object.keys(grouped).filter((t) => !groupOrder.includes(t)),
+  ];
+
+  const tagLabels: Record<string, string> = {
+    patent: 'Patents',
+    scholar: 'Academic Papers',
+    github: 'GitHub Repositories',
+    web: 'Web References',
+    google: 'Web References',
+  };
+
+  const tagIcons: Record<string, React.ReactNode> = {
+    patent: <BookOpen className="h-4 w-4" />,
+    scholar: <GraduationCap className="h-4 w-4" />,
+    github: <GitBranch className="h-4 w-4" />,
+    web: <ExternalLink className="h-4 w-4" />,
+    google: <ExternalLink className="h-4 w-4" />,
+  };
+
+  const tagColors: Record<string, string> = {
+    patent: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+    scholar: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+    github: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+    web: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+    google: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+  };
+
+  return (
+    <Card className="p-5 space-y-5">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        References
+      </h3>
+
+      {orderedTags.map((tag, idx) => {
+        const items = grouped[tag];
+        const label = tagLabels[tag] || tag;
+        const icon = tagIcons[tag] || <ExternalLink className="h-4 w-4" />;
+        const colorCls = tagColors[tag] || 'bg-gray-500/10 text-gray-500 border-gray-500/20';
+        return (
+          <div key={tag} className="space-y-2">
+            {idx > 0 && <Separator className="mb-3" />}
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-medium flex items-center gap-1.5">
+                {icon} {label}
+              </h4>
+              <Badge variant="outline" className={`${colorCls} text-[10px]`}>
+                {items.length}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {items.slice(0, 12).map((ref, i) => (
+                <a
+                  key={i}
+                  href={ref.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block p-2.5 rounded-md bg-muted/30 hover:bg-muted/50 border border-border/50 transition-colors"
+                >
+                  <div className="flex items-start gap-2">
+                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="text-xs font-medium line-clamp-2">{ref.title}</p>
+                      {ref.description && (
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">
+                          {ref.description}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                        {ref.published_year && <span>{ref.published_year}</span>}
+                        {ref.citation_count != null && (
+                          <span className="flex items-center gap-0.5">
+                            <Star className="h-2.5 w-2.5" /> {ref.citation_count}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+            {items.length > 12 && (
+              <p className="text-[10px] text-muted-foreground italic">
+                +{items.length - 12} more
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  );
+};
+
 // ── Future Section (stateful — supports detailed problem generation) ──
 
 const FutureSection = ({
@@ -625,6 +795,24 @@ const FutureSection = ({
               <Card key={i} className="p-4 space-y-2 bg-muted/30 border-l-4 border-l-primary">
                 <h5 className="text-sm font-semibold">{p.title}</h5>
                 <p className="text-xs leading-relaxed">{p.description}</p>
+
+                {/* Core Tech + Research Area chips */}
+                {((p.core_technologies && p.core_technologies.length > 0) ||
+                  (p.research_areas && p.research_areas.length > 0)) && (
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {p.core_technologies?.map((t, j) => (
+                      <Badge key={`t-${j}`} variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-[10px]">
+                        <Cpu className="h-2.5 w-2.5 mr-1" /> {t}
+                      </Badge>
+                    ))}
+                    {p.research_areas?.map((r, j) => (
+                      <Badge key={`r-${j}`} variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20 text-[10px]">
+                        <FlaskConical className="h-2.5 w-2.5 mr-1" /> {r}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3 mt-1">
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-0.5">Rationale</p>
@@ -719,11 +907,47 @@ const FutureSection = ({
         {data.research_questions.length > 0 && (
           <div className="space-y-2">
             <h4 className="text-sm font-medium">Open Research Questions</h4>
-            <ol className="space-y-1.5 list-decimal list-inside">
-              {data.research_questions.map((q, i) => (
-                <li key={i} className="text-sm">{q}</li>
-              ))}
-            </ol>
+            <div className="space-y-3">
+              {data.research_questions.map((q, i) => {
+                const isStructured = typeof q !== 'string';
+                if (!isStructured) {
+                  // Legacy string form
+                  return (
+                    <div key={i} className="flex items-start gap-2 text-sm">
+                      <Badge variant="outline" className="font-mono text-[10px] shrink-0">{i + 1}</Badge>
+                      <p className="text-sm">{q as string}</p>
+                    </div>
+                  );
+                }
+                const rq = q as ResearchQuestion;
+                return (
+                  <Card key={i} className="p-3 space-y-1.5 bg-muted/30">
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="font-mono text-[10px] shrink-0 mt-0.5">{i + 1}</Badge>
+                      <p className="text-sm font-medium">{rq.question}</p>
+                    </div>
+                    {rq.expected_gain && (
+                      <div className="flex items-start gap-2 ml-7">
+                        <TrendingUp className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
+                        <div className="text-xs">
+                          <span className="text-muted-foreground">Expected gain: </span>
+                          <span>{rq.expected_gain}</span>
+                        </div>
+                      </div>
+                    )}
+                    {rq.success_criteria && (
+                      <div className="flex items-start gap-2 ml-7">
+                        <Target className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                        <div className="text-xs">
+                          <span className="text-muted-foreground">Success criteria: </span>
+                          <span>{rq.success_criteria}</span>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
           </div>
         )}
       </Card>

@@ -27,8 +27,20 @@ export interface KeyPlayer {
   link?: string | null;
 }
 
+export interface SotaApproach {
+  approach: string;
+  actor?: string | null;
+  key_metric: string;
+  current_best: string;
+  strengths_one_line: string;
+  limitations_one_line: string;
+  source: string;
+  year?: number | null;
+}
+
 export interface AsIsSynthesis {
   summary: string;
+  sota_comparison?: SotaApproach[];
   key_findings: KeyFinding[];
   timeline: TimelineEntry[];
   key_players: KeyPlayer[];
@@ -60,12 +72,20 @@ export interface FutureProblem {
   description: string;
   rationale: string;
   potential_impact: string;
+  core_technologies?: string[];
+  research_areas?: string[];
+}
+
+export interface ResearchQuestion {
+  question: string;
+  expected_gain: string;
+  success_criteria: string;
 }
 
 export interface FutureDirections {
   problem_statements: FutureProblem[];
   opportunities: string[];
-  research_questions: string[];
+  research_questions: (string | ResearchQuestion)[];
 }
 
 export interface RiskItem {
