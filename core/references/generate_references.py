@@ -2,7 +2,6 @@ import asyncio
 import math
 import re
 import datetime
-from concurrent.futures import ThreadPoolExecutor
 from time import time
 
 from core.models.worklet import Reference
@@ -41,33 +40,47 @@ def _compute_quality_scores(refs: list[Reference]) -> list[Reference]:
     return refs
 
 
+async def _safe_fetch(coro_or_future, source_name: str, timeout: float = 25.0) -> list[Reference]:
+    """Wrap a reference-source future so a slow/failing source returns [] instead of sinking the batch."""
+    try:
+        return await asyncio.wait_for(coro_or_future, timeout=timeout)
+    except asyncio.TimeoutError:
+        print(f"[references] {source_name} timed out after {timeout}s")
+        return []
+    except Exception as e:
+        print(f"[references] {source_name} failed: {e}")
+        return []
+
+
 async def generate_references(keywords: ReferenceKeywordResult) -> list[Reference]:
+    loop = asyncio.get_running_loop()
 
-    with ThreadPoolExecutor() as executor:
-        loop = asyncio.get_running_loop()
-        github_future = loop.run_in_executor(None, get_github_references, keywords.github_keyword)
-        scholar_future = loop.run_in_executor(
-            None, get_google_scholar_references, keywords.google_scholar_keyword
-        )
-        patent_keyword = keywords.patent_keyword or keywords.google_scholar_keyword
-        patent_future = loop.run_in_executor(
-            None, get_patent_references, patent_keyword
-        )
+    github_future = loop.run_in_executor(None, get_github_references, keywords.github_keyword)
+    scholar_future = loop.run_in_executor(
+        None, get_google_scholar_references, keywords.google_scholar_keyword
+    )
+    patent_keyword = keywords.patent_keyword or keywords.google_scholar_keyword
+    patent_future = loop.run_in_executor(None, get_patent_references, patent_keyword)
 
-        githubReferences, googleScholarReferences, patentReferences = await asyncio.gather(
-            github_future, scholar_future, patent_future
-        )
-        webReferences = []
+    githubReferences, googleScholarReferences, patentReferences = await asyncio.gather(
+        _safe_fetch(github_future, "github"),
+        _safe_fetch(scholar_future, "scholar"),
+        _safe_fetch(patent_future, "patents"),
+    )
 
-        if len(googleScholarReferences) == 0:
-            tool_results = await search_tool(
-                query=keywords.google_scholar_keyword,
-                max_results=10,
-                depth="advanced",
-                include_answer=False,
-                include_favicon=False,
+    webReferences: list[Reference] = []
+    if len(googleScholarReferences) == 0:
+        try:
+            tool_results = await asyncio.wait_for(
+                search_tool(
+                    query=keywords.google_scholar_keyword,
+                    max_results=10,
+                    depth="advanced",
+                    include_answer=False,
+                    include_favicon=False,
+                ),
+                timeout=25.0,
             )
-
             for r in tool_results.get("results", []):
                 webReferences.append(
                     Reference(
@@ -77,8 +90,12 @@ async def generate_references(keywords: ReferenceKeywordResult) -> list[Referenc
                         tag="google",
                     )
                 )
+        except asyncio.TimeoutError:
+            print("[references] web fallback timed out")
+        except Exception as e:
+            print(f"[references] web fallback failed: {e}")
 
-    response = []
+    response: list[Reference] = []
     response.extend(googleScholarReferences)
     response.extend(githubReferences)
     response.extend(patentReferences)

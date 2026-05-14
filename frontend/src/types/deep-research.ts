@@ -28,6 +28,7 @@ export interface KeyPlayer {
 }
 
 export interface SotaApproach {
+  row_id?: string;
   approach: string;
   actor?: string | null;
   key_metric: string;
@@ -36,6 +37,12 @@ export interface SotaApproach {
   limitations_one_line: string;
   source: string;
   year?: number | null;
+}
+
+export interface Gap {
+  description: string;
+  blocked_metric?: string;
+  evidence_rows?: string[];
 }
 
 export interface AsIsSynthesis {
@@ -64,7 +71,13 @@ export interface OpenSourceProject {
 export interface ComparativeAnalysis {
   comparisons: Comparison[];
   open_source_landscape: OpenSourceProject[];
-  gaps: string[];
+  gaps: (string | Gap)[];
+}
+
+export interface ProblemReference {
+  title: string;
+  link: string;
+  why_relevant: string;
 }
 
 export interface FutureProblem {
@@ -74,10 +87,12 @@ export interface FutureProblem {
   potential_impact: string;
   core_technologies?: string[];
   research_areas?: string[];
+  relevant_references?: ProblemReference[];
 }
 
 export interface ResearchQuestion {
   question: string;
+  target_metric?: string;
   expected_gain: string;
   success_criteria: string;
 }

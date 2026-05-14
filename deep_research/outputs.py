@@ -45,9 +45,13 @@ class KeyPlayer(BaseModel):
 class SotaApproach(BaseModel):
     """A single approach in a side-by-side SOTA comparison row."""
 
-    approach: str = Field(..., description="Name of the approach, method, or system")
+    row_id: str = Field(
+        ...,
+        description="Stable short identifier for this row (e.g., 'R1', 'R2'). Used by gaps to cite which rows demonstrate the limitation.",
+    )
+    approach: str = Field(..., description="Name of the approach, method, or system. Cluster minor variants under one representative.")
     actor: Optional[str] = Field(None, description="Who built/proposed it (person, company, institution)")
-    key_metric: str = Field(..., description="The metric used to judge quality (e.g., latency, accuracy, throughput)")
+    key_metric: str = Field(..., description="The single metric used across the table to rank approaches (e.g., 'p95 latency', 'throughput at 10% loss', 'mAP@0.5'). MUST be the same across all rows.")
     current_best: str = Field(..., description="The reported value for this approach (with units), e.g., '142ms p95' or '78.4 mAP'")
     strengths_one_line: str = Field(..., description="What this approach is best at, in one short line")
     limitations_one_line: str = Field(..., description="Where it falls short relative to others, in one short line")
@@ -61,7 +65,7 @@ class AsIsSynthesisResult(BaseModel):
     )
     sota_comparison: List[SotaApproach] = Field(
         default_factory=list,
-        description="Head-to-head comparison of 4-8 leading approaches. Each row uses the SAME key_metric where possible so they can be ranked. This is the primary artifact of the SOTA section.",
+        description="Head-to-head comparison of EXACTLY 4-6 leading approaches. ALL rows MUST use the SAME key_metric. Cluster minor variants under one representative row — do NOT list every paper or every flavour of an approach. This is the primary artifact of the SOTA section.",
     )
     key_findings: List[KeyFinding] = Field(
         ..., description="Top findings with sources"
@@ -89,6 +93,23 @@ class OpenSourceProject(BaseModel):
     last_updated: Optional[str] = Field(None, description="Last update date")
 
 
+class Gap(BaseModel):
+    """A structured gap that cites which SOTA comparison rows demonstrate the limitation."""
+
+    description: str = Field(
+        ...,
+        description="The gap itself, phrased as what is missing or under-served — concrete, not generic.",
+    )
+    blocked_metric: str = Field(
+        ...,
+        description="The domain metric this gap is preventing improvement on. SHOULD match one of the key_metric values from sota_comparison (e.g., 'p95 latency', 'throughput', 'mAP@0.5').",
+    )
+    evidence_rows: List[str] = Field(
+        default_factory=list,
+        description="row_id values from the sota_comparison table that demonstrate this gap (e.g., ['R1', 'R3']). Connects the gap to specific evidence in the SOTA table.",
+    )
+
+
 class ComparativeAnalysisResult(BaseModel):
     comparisons: List[Comparison] = Field(
         ..., description="Side-by-side comparisons of different approaches"
@@ -96,8 +117,20 @@ class ComparativeAnalysisResult(BaseModel):
     open_source_landscape: List[OpenSourceProject] = Field(
         ..., description="Relevant open source projects"
     )
-    gaps: List[str] = Field(
-        ..., description="Identified gaps in current research and implementations"
+    gaps: List[Gap] = Field(
+        ...,
+        description="Structured gaps. Each gap MUST cite which SOTA rows demonstrate it (evidence_rows) and which domain metric is blocked.",
+    )
+
+
+class ProblemReference(BaseModel):
+    """A reference picked from the larger reference pool that supports a specific problem."""
+
+    title: str = Field(..., description="Title of the reference (paper, patent, repo, web page)")
+    link: str = Field(..., description="URL of the reference")
+    why_relevant: str = Field(
+        ...,
+        description="One short line explaining why this reference is relevant to THIS problem (not a generic summary of the reference).",
     )
 
 
@@ -118,17 +151,25 @@ class FutureProblem(BaseModel):
         default_factory=list,
         description="Specific research areas from the entities list this problem sits in. MUST be drawn from the provided entities.research_areas.",
     )
+    relevant_references: List[ProblemReference] = Field(
+        default_factory=list,
+        description="3-5 references from the provided references pool that directly support this problem. MUST be drawn from the provided references — do not invent new ones. Each must include a one-line why_relevant explaining the connection to THIS specific problem.",
+    )
 
 
 class ResearchQuestion(BaseModel):
     question: str = Field(..., description="The open research question, phrased as a clear question")
+    target_metric: str = Field(
+        ...,
+        description="The DOMAIN performance metric this question targets. MUST be one of the key_metric values from sota_comparison (e.g., 'p95 latency', 'throughput', 'mAP@0.5', 'energy per inference'). DO NOT use meta-metrics like 'benchmark coverage', 'integration completeness', or 'survey breadth'.",
+    )
     expected_gain: str = Field(
         ...,
-        description="If solved, what concrete improvement or gain is expected — quantified where possible (e.g., 'reduce p99 latency by 30-40%', 'enable on-device inference under 50MB')",
+        description="If solved, what concrete improvement on the target_metric is expected — quantified where possible (e.g., 'reduce p99 latency by 30-40% relative to BBRv2', 'lift mAP@0.5 by 3-5 points on COCO').",
     )
     success_criteria: str = Field(
         ...,
-        description="How would you know this question has been answered? A measurable signal or experiment that confirms a positive answer.",
+        description="A measurable experiment that confirms a positive answer (e.g., 'beat BBRv2 on tail latency on the Pantheon testbed').",
     )
 
 

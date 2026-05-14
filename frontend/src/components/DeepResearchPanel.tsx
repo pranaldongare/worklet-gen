@@ -20,6 +20,7 @@ import type {
   FutureDirections,
   DetailedProblemStatement,
   ResearchQuestion,
+  SotaApproach,
 } from '@/types/deep-research';
 import type { Reference } from '@/types/thread';
 
@@ -257,7 +258,7 @@ export const DeepResearchPanel = ({ researchId, open, onClose, inline = false }:
 
           {/* Comparative */}
           {comparative ? (
-            <ComparativeSection data={comparative} />
+            <ComparativeSection data={comparative} sotaComparison={asIs?.sota_comparison} />
           ) : asIs && status === 'running' ? (
             <SectionSkeleton title="Performing comparative analysis..." />
           ) : null}
@@ -389,6 +390,7 @@ const AsIsSection = ({ data }: { data: AsIsSynthesis }) => (
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left p-2 font-medium">#</th>
                   <th className="text-left p-2 font-medium">Approach</th>
                   <th className="text-left p-2 font-medium">Actor</th>
                   <th className="text-left p-2 font-medium">Metric</th>
@@ -401,6 +403,11 @@ const AsIsSection = ({ data }: { data: AsIsSynthesis }) => (
               <tbody>
                 {data.sota_comparison.map((s, i) => (
                   <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
+                    <td className="p-2">
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {s.row_id || `R${i + 1}`}
+                      </Badge>
+                    </td>
                     <td className="p-2 font-medium">
                       {s.approach}
                       {s.year && <span className="text-muted-foreground ml-1">({s.year})</span>}
@@ -510,7 +517,23 @@ const AsIsSection = ({ data }: { data: AsIsSynthesis }) => (
   </Card>
 );
 
-const ComparativeSection = ({ data }: { data: ComparativeAnalysis }) => (
+const ComparativeSection = ({
+  data,
+  sotaComparison,
+}: {
+  data: ComparativeAnalysis;
+  sotaComparison?: SotaApproach[];
+}) => {
+  // Build a row_id -> SOTA row map so gap evidence can resolve to approach + source link.
+  const sotaByRowId: Record<string, SotaApproach> = {};
+  if (sotaComparison) {
+    sotaComparison.forEach((s, idx) => {
+      const id = s.row_id || `R${idx + 1}`;
+      sotaByRowId[id] = s;
+    });
+  }
+
+  return (
   <Card className="p-5 space-y-5">
     <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
       Comparative Analysis
@@ -592,18 +615,97 @@ const ComparativeSection = ({ data }: { data: ComparativeAnalysis }) => (
     {data.gaps.length > 0 && (
       <div className="space-y-2">
         <h4 className="text-sm font-medium">Identified Gaps</h4>
-        <ul className="space-y-1.5">
-          {data.gaps.map((g, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <AlertCircle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
-              {g}
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2">
+          {data.gaps.map((g, i) => {
+            if (typeof g === 'string') {
+              // Legacy string form
+              return (
+                <div key={i} className="flex items-start gap-2 text-sm">
+                  <AlertCircle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+                  <span>{g}</span>
+                </div>
+              );
+            }
+            return (
+              <Card key={i} className="p-3 space-y-1.5 bg-muted/30">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+                  <p className="text-sm">{g.description}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 ml-6">
+                  {g.blocked_metric && (
+                    <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-[10px]">
+                      <TrendingUp className="h-2.5 w-2.5 mr-1" />
+                      blocks: {g.blocked_metric}
+                    </Badge>
+                  )}
+                </div>
+                {g.evidence_rows && g.evidence_rows.length > 0 && (
+                  <div className="ml-6 space-y-1">
+                    <span className="text-[10px] text-muted-foreground">Evidence</span>
+                    {g.evidence_rows.map((row, j) => {
+                      const sota = sotaByRowId[row];
+                      if (!sota) {
+                        return (
+                          <Badge key={j} variant="outline" className="font-mono text-[10px] mr-1">
+                            {row}
+                          </Badge>
+                        );
+                      }
+                      const url = sota.source && sota.source.startsWith('http') ? sota.source : null;
+                      const subtitle =
+                        sota.key_metric && sota.current_best
+                          ? `${sota.key_metric}: ${sota.current_best}`
+                          : sota.current_best || sota.key_metric || '';
+                      const cardCls =
+                        'block p-2 rounded bg-background/60 border border-border/50 transition-colors' +
+                        (url ? ' hover:border-primary/40' : '');
+                      const inner = (
+                        <div className="flex items-start gap-2">
+                          <Badge variant="outline" className="font-mono text-[10px] shrink-0 mt-0.5">
+                            {row}
+                          </Badge>
+                          {url && <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 mt-1" />}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-medium line-clamp-1">
+                              {sota.approach}
+                              {sota.actor && (
+                                <span className="text-muted-foreground font-normal"> — {sota.actor}</span>
+                              )}
+                            </p>
+                            {subtitle && (
+                              <p className="text-[10px] text-muted-foreground line-clamp-1">{subtitle}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                      return url ? (
+                        <a
+                          key={j}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cardCls}
+                        >
+                          {inner}
+                        </a>
+                      ) : (
+                        <div key={j} className={cardCls}>
+                          {inner}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
       </div>
     )}
   </Card>
-);
+  );
+};
 
 const ReferencesSection = ({ references }: { references: Reference[] }) => {
   const grouped: Record<string, Reference[]> = {};
@@ -824,6 +926,38 @@ const FutureSection = ({
                   </div>
                 </div>
 
+                {/* Relevant References for this problem */}
+                {p.relevant_references && p.relevant_references.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <BookOpen className="h-3 w-3" /> Relevant References
+                    </p>
+                    <div className="space-y-1">
+                      {p.relevant_references.map((r, j) => (
+                        <a
+                          key={j}
+                          href={r.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block p-2 rounded bg-background/60 border border-border/50 hover:border-primary/40 transition-colors"
+                        >
+                          <div className="flex items-start gap-1.5">
+                            <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-medium line-clamp-1">{r.title}</p>
+                              {r.why_relevant && (
+                                <p className="text-[10px] text-muted-foreground line-clamp-2">
+                                  {r.why_relevant}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Detailed Problem Action Bar */}
                 <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
                   {localDetailed[String(i)] ? (
@@ -926,6 +1060,13 @@ const FutureSection = ({
                       <Badge variant="outline" className="font-mono text-[10px] shrink-0 mt-0.5">{i + 1}</Badge>
                       <p className="text-sm font-medium">{rq.question}</p>
                     </div>
+                    {rq.target_metric && (
+                      <div className="ml-7">
+                        <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px]">
+                          <Target className="h-2.5 w-2.5 mr-1" /> target: {rq.target_metric}
+                        </Badge>
+                      </div>
+                    )}
                     {rq.expected_gain && (
                       <div className="flex items-start gap-2 ml-7">
                         <TrendingUp className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />

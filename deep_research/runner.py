@@ -189,10 +189,15 @@ async def run_deep_research(input: DeepResearchInput) -> DeepResearchResult:
         all_references: list[Reference] = []
         for kw in ref_keywords:
             try:
+                # Backstop timeout — generate_references has its own per-source 25s timeouts,
+                # so this only fires if all three sources hang together.
                 refs = await asyncio.wait_for(
-                    generate_references(kw), timeout=30
+                    generate_references(kw), timeout=90
                 )
                 all_references.extend(refs)
+                print(
+                    f"[Deep Research] {len(refs)} refs for: {kw.google_scholar_keyword}"
+                )
             except (asyncio.TimeoutError, Exception):
                 print(f"[Deep Research] Reference search timed out/failed for: {kw.google_scholar_keyword}")
 
@@ -269,8 +274,9 @@ async def run_deep_research(input: DeepResearchInput) -> DeepResearchResult:
             contents=future_directions_prompt(
                 _truncate(full_context, 8000),
                 entities_str,
-                json.dumps(as_is.model_dump(), default=str),
-                json.dumps(comparative.model_dump(), default=str),
+                as_is.model_dump(),
+                comparative.model_dump(),
+                references=[r.model_dump() for r in unique_refs[:25]],
             ),
             port=llm_port,
         )

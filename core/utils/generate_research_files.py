@@ -103,7 +103,8 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
             sota_comparison = as_is.get("sota_comparison", []) or []
             if sota_comparison:
                 elements.append(Paragraph("<b>Head-to-Head Comparison</b>", sub_header))
-                for s in sota_comparison:
+                for idx, s in enumerate(sota_comparison, 1):
+                    row_id = s.get("row_id", "") or f"R{idx}"
                     approach = s.get("approach", "")
                     actor = s.get("actor", "") or ""
                     metric = s.get("key_metric", "")
@@ -116,7 +117,7 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
                     year_str = f" ({year})" if year else ""
                     elements.append(
                         Paragraph(
-                            f"<b>{escape(approach)}</b>{actor_str}{year_str}",
+                            f"<b>[{escape(str(row_id))}] {escape(approach)}</b>{actor_str}{year_str}",
                             normal,
                         )
                     )
@@ -220,7 +221,25 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
             if gaps:
                 elements.append(Paragraph("<b>Identified Gaps</b>", sub_header))
                 for g in gaps:
-                    elements.append(Paragraph(f"• {escape(str(g))}", bullet))
+                    if isinstance(g, dict):
+                        desc = g.get("description", "")
+                        blocked = g.get("blocked_metric", "")
+                        rows = g.get("evidence_rows", []) or []
+                        elements.append(Paragraph(f"• {escape(desc)}", bullet))
+                        meta_bits = []
+                        if blocked:
+                            meta_bits.append(f"blocks: {escape(blocked)}")
+                        if rows:
+                            meta_bits.append(f"evidence: {', '.join(escape(str(r)) for r in rows)}")
+                        if meta_bits:
+                            elements.append(
+                                Paragraph(
+                                    f"&nbsp;&nbsp;<i>{' · '.join(meta_bits)}</i>",
+                                    bullet,
+                                )
+                            )
+                    else:
+                        elements.append(Paragraph(f"• {escape(str(g))}", bullet))
                 elements.append(Spacer(1, 4))
 
         # ── Future Directions ──
@@ -257,6 +276,24 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
                         elements.append(
                             Paragraph(f"<i>Potential Impact:</i> {escape(impact)}", bullet)
                         )
+                    rel_refs = p.get("relevant_references", []) or []
+                    if rel_refs:
+                        elements.append(
+                            Paragraph("<i>Relevant References:</i>", bullet)
+                        )
+                        for r in rel_refs:
+                            r_title = r.get("title", "")
+                            r_link = r.get("link", "")
+                            r_why = r.get("why_relevant", "")
+                            if r_link:
+                                line = f'&nbsp;&nbsp;• {escape(r_title)} <a href="{r_link}" color="blue"><u>link</u></a>'
+                            else:
+                                line = f"&nbsp;&nbsp;• {escape(r_title)}"
+                            elements.append(Paragraph(line, bullet))
+                            if r_why:
+                                elements.append(
+                                    Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;<i>{escape(r_why)}</i>", bullet)
+                                )
                     elements.append(Spacer(1, 4))
 
             opps = future.get("opportunities", [])
@@ -272,11 +309,16 @@ def create_research_pdf(doc: dict, in_memory: bool = True) -> bytes | None:
                 for i, q in enumerate(questions, 1):
                     if isinstance(q, dict):
                         question_text = q.get("question", "")
+                        target_metric = q.get("target_metric", "")
                         gain = q.get("expected_gain", "")
                         criteria = q.get("success_criteria", "")
                         elements.append(
                             Paragraph(f"<b>{i}. {escape(question_text)}</b>", normal)
                         )
+                        if target_metric:
+                            elements.append(
+                                Paragraph(f"&nbsp;&nbsp;<i>Target metric:</i> {escape(target_metric)}", bullet)
+                            )
                         if gain:
                             elements.append(
                                 Paragraph(f"&nbsp;&nbsp;<i>Expected gain:</i> {escape(gain)}", bullet)
@@ -446,7 +488,8 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
             sota_comparison = as_is.get("sota_comparison", []) or []
             if sota_comparison:
                 lines = []
-                for s in sota_comparison:
+                for idx, s in enumerate(sota_comparison, 1):
+                    row_id = s.get("row_id", "") or f"R{idx}"
                     approach = s.get("approach", "")
                     actor = s.get("actor", "") or ""
                     metric = s.get("key_metric", "")
@@ -456,7 +499,7 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
                     year = s.get("year", "")
                     actor_str = f" — {actor}" if actor else ""
                     year_str = f" ({year})" if year else ""
-                    lines.append(f"• {approach}{actor_str}{year_str}")
+                    lines.append(f"• [{row_id}] {approach}{actor_str}{year_str}")
                     lines.append(f"    {metric}: {best}")
                     if strengths:
                         lines.append(f"    + {strengths}")
@@ -514,7 +557,23 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
 
             gaps = comparative.get("gaps", [])
             if gaps:
-                text = "\n".join(f"• {g}" for g in gaps)
+                lines = []
+                for g in gaps:
+                    if isinstance(g, dict):
+                        desc = g.get("description", "")
+                        blocked = g.get("blocked_metric", "")
+                        rows = g.get("evidence_rows", []) or []
+                        lines.append(f"• {desc}")
+                        meta_bits = []
+                        if blocked:
+                            meta_bits.append(f"blocks: {blocked}")
+                        if rows:
+                            meta_bits.append(f"evidence: {', '.join(str(r) for r in rows)}")
+                        if meta_bits:
+                            lines.append(f"    {' · '.join(meta_bits)}")
+                    else:
+                        lines.append(f"• {g}")
+                text = "\n".join(lines)
                 est = estimate_height_wrapped_content(text)
                 _ensure_space(est + gap)
                 top = add_textbox(slide, "Identified Gaps", text, top)
@@ -532,13 +591,28 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
                 impact = p.get("potential_impact", "")
                 core_tech = p.get("core_technologies", []) or []
                 research_areas = p.get("research_areas", []) or []
+                rel_refs = p.get("relevant_references", []) or []
                 chip_lines = []
                 if core_tech:
                     chip_lines.append("Tech: " + ", ".join(str(t) for t in core_tech))
                 if research_areas:
                     chip_lines.append("Areas: " + ", ".join(str(r) for r in research_areas))
                 chips_str = ("\n" + "\n".join(chip_lines)) if chip_lines else ""
-                text = f"{desc}{chips_str}\nRationale: {rationale}\nPotential Impact: {impact}"
+                ref_lines = []
+                if rel_refs:
+                    ref_lines.append("Relevant References:")
+                    for r in rel_refs:
+                        r_title = r.get("title", "")
+                        r_link = r.get("link", "")
+                        r_why = r.get("why_relevant", "")
+                        ref_lines.append(f"  • {r_title}" + (f" — {r_link}" if r_link else ""))
+                        if r_why:
+                            ref_lines.append(f"    {r_why}")
+                refs_str = ("\n" + "\n".join(ref_lines)) if ref_lines else ""
+                text = (
+                    f"{desc}{chips_str}\nRationale: {rationale}\n"
+                    f"Potential Impact: {impact}{refs_str}"
+                )
                 est = estimate_height_wrapped_content(text)
                 _ensure_space(est + gap)
                 top = add_textbox(slide, title, text, top)
@@ -556,9 +630,12 @@ def create_research_ppt(doc: dict, in_memory: bool = True) -> bytes | None:
                 for i, q in enumerate(questions, 1):
                     if isinstance(q, dict):
                         question_text = q.get("question", "")
+                        target_metric = q.get("target_metric", "")
                         gain = q.get("expected_gain", "")
                         criteria = q.get("success_criteria", "")
                         lines.append(f"{i}. {question_text}")
+                        if target_metric:
+                            lines.append(f"    Target metric: {target_metric}")
                         if gain:
                             lines.append(f"    Expected gain: {gain}")
                         if criteria:

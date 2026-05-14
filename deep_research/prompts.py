@@ -153,13 +153,18 @@ def as_is_synthesis_prompt(
                 "descriptive overview. State the dominant axes of competition (e.g., 'Approaches differ "
                 "primarily on X vs Y') and what the comparison table below reveals.\n\n"
                 "2. **SOTA Comparison (PRIMARY ARTIFACT)** — Build a side-by-side comparison table of "
-                "4-8 leading approaches. For EACH approach include:\n"
-                "   - approach: Name (e.g., 'BBRv3', 'Cubic+', 'Vegas-EW')\n"
-                "   - actor: Who built it (company / institution / author)\n"
-                "   - key_metric: Pick ONE primary metric used across the field (e.g., 'p95 latency', "
-                "'throughput at 10% loss', 'mAP@0.5'). USE THE SAME metric across rows where possible "
-                "so the rows can be ranked head-to-head.\n"
-                "   - current_best: The reported value WITH UNITS (e.g., '142ms', '78.4%', '12.3 Mbps'). "
+                "EXACTLY 4-6 leading approaches. NOT 8. NOT 10. 4-6.\n"
+                "   ALL ROWS MUST USE THE SAME key_metric. Pick the single most-cited domain metric "
+                "(e.g., 'p95 latency', 'throughput at 10% loss', 'mAP@0.5') and stick with it. If a "
+                "candidate approach is not measured on that metric, exclude it.\n"
+                "   CLUSTER MINOR VARIANTS. If three papers all describe variants of the same idea "
+                "(e.g., 'BBR', 'BBRv2', 'BBRv3'), choose ONE representative row — do not list every flavour.\n"
+                "   For EACH row include:\n"
+                "   - row_id: A short stable id ('R1', 'R2', 'R3', ...) so gaps can cite this row later.\n"
+                "   - approach: Name (e.g., 'BBR family', 'CUBIC family', 'Copa').\n"
+                "   - actor: Who built it (company / institution / author group).\n"
+                "   - key_metric: The SAME metric used in every row.\n"
+                "   - current_best: The reported value WITH UNITS (e.g., '142ms p95', '78.4 mAP'). "
                 "If the source doesn't give a number, use a qualitative rank like 'best/good/poor' and "
                 "mark it as such.\n"
                 "   - strengths_one_line: ONE sentence on what this approach is best at.\n"
@@ -234,13 +239,22 @@ def comparative_analysis_prompt(
                 "2. **Open Source Landscape** — List 3-8 relevant open-source projects with name, URL, "
                 "description, stars (if known), and last update date (if known). "
                 "Focus on actively maintained, production-relevant projects.\n\n"
-                "3. **Gaps** — Identify 3-6 specific gaps in current research and implementations. "
-                "These should be concrete, actionable observations about what's missing or underexplored.\n\n"
+                "3. **Gaps (STRUCTURED)** — Identify 3-6 specific gaps. Each gap MUST be tied to "
+                "concrete evidence from the SOTA comparison table in the As-Is synthesis. For each gap:\n"
+                "   - **description**: What is missing or under-served. Be concrete (e.g., "
+                "'No approach handles bursty cross-traffic above 50% loss without throughput collapse'). "
+                "AVOID generic gaps like 'more research is needed' or 'better benchmarks would help'.\n"
+                "   - **blocked_metric**: The DOMAIN performance metric this gap is preventing improvement on. "
+                "MUST be one of the key_metric values from the SOTA comparison table (e.g., 'p95 latency', "
+                "'throughput at 10% loss', 'mAP@0.5'). Do NOT use meta-metrics like 'benchmark coverage'.\n"
+                "   - **evidence_rows**: List of row_id strings from the SOTA comparison that demonstrate "
+                "this gap (e.g., ['R1', 'R3']). Every gap MUST cite at least one row. If a gap can't be "
+                "tied to a specific SOTA row, drop it.\n\n"
                 "Rules:\n"
                 "- Base comparisons on ACTUAL information from search results and references.\n"
                 "- Be objective — present both strengths and limitations fairly.\n"
                 "- For open source projects, only include real projects from search results or references.\n"
-                "- Gaps should be specific enough to inspire new research directions.\n"
+                "- Gaps must cite SOTA rows. No row citation = drop the gap.\n"
                 "- Return ONLY valid JSON, no commentary."
             ),
         }
@@ -277,10 +291,36 @@ def future_directions_prompt(
     entities: dict,
     as_is: dict,
     comparative: dict,
+    references: list | None = None,
 ) -> list[dict]:
     """Generate forward-looking problem statements and research directions."""
+    import json as _json
 
     contents = []
+
+    # Extract domain metrics from sota_comparison so the LLM can be constrained
+    sota_metrics: list[str] = []
+    try:
+        for row in (as_is or {}).get("sota_comparison", []) or []:
+            metric = row.get("key_metric") if isinstance(row, dict) else None
+            if metric and metric not in sota_metrics:
+                sota_metrics.append(metric)
+    except Exception:
+        sota_metrics = []
+    metrics_str = ", ".join(f"'{m}'" for m in sota_metrics) if sota_metrics else "(none extracted — pick a real domain metric implied by the analysis)"
+
+    # Format references for inclusion (cap to avoid blowing the context)
+    refs_block = ""
+    if references:
+        ref_lines = []
+        for ref in references[:25]:
+            if isinstance(ref, dict):
+                title = ref.get("title", "")
+                link = ref.get("link", "")
+                tag = ref.get("tag", "")
+                tag_str = f" [{tag}]" if tag else ""
+                ref_lines.append(f"- {title}{tag_str} — {link}")
+        refs_block = "\n".join(ref_lines)
 
     contents.append(
         {
@@ -288,9 +328,9 @@ def future_directions_prompt(
             "parts": (
                 "You are a **Visionary Research Strategist** identifying the most promising future "
                 "directions and generating forward-looking problem statements that are TIGHTLY GROUNDED "
-                "in the entities and gaps identified earlier in the pipeline.\n\n"
+                "in the entities, gaps, and DOMAIN METRICS identified earlier in the pipeline.\n\n"
                 "Based on the current state of the art (As-Is synthesis), comparative analysis, "
-                "and identified gaps, produce:\n\n"
+                "identified gaps, and the references pool, produce:\n\n"
                 "1. **Problem Statements** — 3-5 concrete, forward-looking problem statements. Each MUST sit "
                 "at the intersection of specific technologies AND specific research areas drawn from the "
                 "provided entities. For each:\n"
@@ -303,25 +343,41 @@ def future_directions_prompt(
                 "   - **core_technologies**: List of 1-3 technologies from entities.technologies that this "
                 "problem builds on. MUST be drawn from the provided entities — DO NOT INVENT NEW ONES.\n"
                 "   - **research_areas**: List of 1-3 research areas from entities.research_areas. "
-                "MUST be drawn from the provided entities — DO NOT INVENT NEW ONES.\n\n"
+                "MUST be drawn from the provided entities — DO NOT INVENT NEW ONES.\n"
+                "   - **relevant_references**: 3-5 references from the provided references pool that "
+                "directly support THIS problem. MUST be picked from the provided references — DO NOT "
+                "INVENT NEW ONES. Each must include a one-line `why_relevant` explaining the connection "
+                "to THIS specific problem (not a generic summary of the reference).\n\n"
                 "2. **Opportunities** — 3-5 high-level opportunity areas that emerge from the analysis.\n\n"
                 "3. **Research Questions** — 5-8 specific, open-ended research questions. Each MUST be "
                 "a structured object with:\n"
                 "   - **question**: The research question itself, phrased as a clear question.\n"
-                "   - **expected_gain**: If solved, what concrete improvement is expected? Quantify where "
-                "possible (e.g., 'reduce p99 latency by 30-40%', 'enable on-device inference under 50MB', "
-                "'cut training compute by 5×'). Avoid vague phrases like 'better performance'.\n"
-                "   - **success_criteria**: A measurable signal or experiment that confirms a positive "
+                "   - **target_metric**: The DOMAIN performance metric this question targets. MUST be "
+                "one of these metrics from the SOTA comparison: " + metrics_str + ". "
+                "If none of those fit, pick a related domain metric — but NEVER use meta-metrics.\n"
+                "   - **expected_gain**: Concrete improvement on the target_metric. Quantify where "
+                "possible (e.g., 'reduce p99 latency by 30-40% relative to BBRv2', "
+                "'lift mAP@0.5 by 3-5 points on COCO').\n"
+                "   - **success_criteria**: A measurable experiment that confirms a positive "
                 "answer (e.g., 'beat BBRv2 on tail latency on the Pantheon testbed').\n\n"
+                "### ANTI-PATTERNS for Research Questions (CRITICAL)\n"
+                "DO NOT generate questions that are about:\n"
+                "- Building benchmarks or evaluation suites\n"
+                "- Integration / interoperability frameworks\n"
+                "- Surveys, taxonomies, or literature studies\n"
+                "- Dataset construction\n"
+                "- 'Holistic' / 'unified' / 'comprehensive' systems with no domain metric\n"
+                "DO generate questions whose answer would directly move one of the SOTA-table metrics "
+                "(latency, throughput, energy, accuracy, error rate, etc.). The KPI must be a real "
+                "PERFORMANCE number that engineers measure, not a meta-metric like 'integration completeness'.\n\n"
                 "Rules:\n"
                 "- Problem statements must be NOVEL — they should go BEYOND what's already been done.\n"
                 "- Ground each problem in the actual gaps and limitations identified.\n"
                 "- core_technologies and research_areas on each problem MUST be exact strings from the "
                 "provided entities lists. Do not paraphrase or invent.\n"
-                "- Research questions should be specific enough to guide a 6-month research project.\n"
+                "- relevant_references MUST be picked from the provided references — exact title+link.\n"
+                "- target_metric MUST be a domain performance metric, not a meta-metric.\n"
                 "- expected_gain should be quantitative where the data permits, qualitative otherwise.\n"
-                "- Focus on problems that have both academic value and practical applicability.\n"
-                "- Prefer problems at the intersection of identified research areas.\n"
                 "- Return ONLY valid JSON, no commentary."
             ),
         }
@@ -334,7 +390,11 @@ def future_directions_prompt(
                 f"### Original Research Context\n{context}\n\n"
                 f"### Extracted Entities\n{entities}\n\n"
                 f"### Current State of the Art\n{as_is}\n\n"
-                f"### Comparative Analysis & Gaps\n{comparative}"
+                f"### Comparative Analysis & Gaps\n{comparative}\n\n"
+                f"### Available References (pick from these for relevant_references)\n"
+                f"{refs_block or '(none provided)'}\n\n"
+                f"### Domain Metrics Available (for target_metric)\n"
+                f"{metrics_str}"
             ),
         }
     )
