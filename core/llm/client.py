@@ -1,10 +1,20 @@
 import asyncio
+import threading
 import time
 from core.config import settings
 from google import genai
 from openai import AsyncOpenAI
 from langchain_core.output_parsers import PydanticOutputParser
-from core.constants import SWITCHES, FALLBACK_OPENAI_MODEL, FALLBACK_GEMINI_MODEL
+from core.constants import (
+    SWITCHES,
+    FALLBACK_OPENAI_MODEL,
+    FALLBACK_GEMINI_MODEL,
+    INTERNAL_BASE_URL,
+    INTERNAL_CLIENT_KEY,
+    INTERNAL_API_TOKEN,
+    INTERNAL_USER_EMAIL,
+    INTERNAL_MODEL_ID,
+)
 
 if SWITCHES["REMOTE_GPU"]:
     import core.llm.configurations.remote_llm as llm_module
@@ -12,6 +22,16 @@ else:
     import core.llm.configurations.local_llm as llm_module
 
 MyServerLLM = llm_module.MyServerLLM
+
+# Always import INTERNALLLM so the class is available when the user toggles
+# USE_INTERNAL on at runtime (the switch is checked at call time).
+INTERNALLLM = None
+try:
+    from core.llm.configurations.INTERNAL_llm import INTERNALLLM
+    print("INTERNALLLM imported successfully")
+except ImportError as e:
+    print(f"INTERNALLLM import failed: {e}. INTERNAL API will be unavailable.")
+    INTERNALLLM = None
 
 API_KEYS = [
     settings.API_KEY_1,
@@ -25,6 +45,38 @@ openai_client = AsyncOpenAI(api_key=settings.OPENAI_API)
 MAX_RETRIES = 8  # Total attempts across all LLMs
 
 count = 0
+
+# ── INTERNAL API rate limiting (3 calls per 60 seconds, shared across the process) ──
+INTERNAL_RATE_LIMIT_CALLS = 3
+INTERNAL_RATE_LIMIT_WINDOW = 60.0  # seconds
+_internal_call_times: list[float] = []
+_internal_lock = threading.Lock()
+
+
+def _internal_rate_limit_acquire() -> bool:
+    """Try to acquire an INTERNAL call slot. Returns True if allowed, False if rate-limited."""
+    if not SWITCHES.get("RATE_LIMIT_INTERNAL", True):
+        return True
+    with _internal_lock:
+        now = time.time()
+        # Purge entries outside the window
+        _internal_call_times[:] = [
+            t for t in _internal_call_times if now - t < INTERNAL_RATE_LIMIT_WINDOW
+        ]
+        if len(_internal_call_times) >= INTERNAL_RATE_LIMIT_CALLS:
+            return False
+        _internal_call_times.append(now)
+        return True
+
+
+def _internal_config_complete() -> bool:
+    """All required INTERNAL_* env values present?"""
+    return bool(
+        INTERNAL_BASE_URL
+        and INTERNAL_CLIENT_KEY
+        and INTERNAL_API_TOKEN
+        and INTERNAL_MODEL_ID
+    )
 
 
 async def invoke_llm(
@@ -54,8 +106,67 @@ async def invoke_llm(
     {contents}
     """
 
+    # Sticky per-call flag: once INTERNAL has a network-level failure, skip it for
+    # the remaining attempts in this invoke_llm call so we don't waste time/quota.
+    skip_internal = False
+
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"\n=== Attempt {attempt}/{MAX_RETRIES} ===")
+
+        # === 0. INTERNAL API ===
+        if SWITCHES.get("USE_INTERNAL", False) and not skip_internal:
+            if INTERNALLLM is None:
+                print("INTERNAL enabled but module unavailable — skipping for this call.")
+                skip_internal = True
+            elif not _internal_config_complete():
+                print(
+                    "INTERNAL enabled but config incomplete "
+                    "(need INTERNAL_BASE_URL, INTERNAL_CLIENT_KEY, INTERNAL_API_TOKEN, INTERNAL_MODEL_ID) — "
+                    "skipping for this call."
+                )
+                skip_internal = True
+            elif not _internal_rate_limit_acquire():
+                print(
+                    f"INTERNAL rate-limited "
+                    f"(>{INTERNAL_RATE_LIMIT_CALLS} calls in {INTERNAL_RATE_LIMIT_WINDOW:.0f}s); "
+                    f"falling through to GPU/fallbacks."
+                )
+            else:
+                try:
+                    print("Trying INTERNAL API...")
+                    internal_llm = INTERNALLLM(
+                        model=INTERNAL_MODEL_ID,
+                        base_url=INTERNAL_BASE_URL,
+                        client_key=INTERNAL_CLIENT_KEY,
+                        api_token=INTERNAL_API_TOKEN,
+                        user_email=INTERNAL_USER_EMAIL,
+                    )
+                    s = time.time()
+                    llm_output = await asyncio.to_thread(internal_llm._call, prompt)
+                    e = time.time()
+                    print(f"Success via INTERNAL API, LLM call took {e - s:.2f}s")
+                    structured = parser.parse(llm_output)
+                    return structured
+                except Exception as exc:
+                    err_str = str(exc).lower()
+                    print(f"INTERNAL API failed: {exc}")
+                    # Sticky-skip on network-level failures so the rest of the
+                    # call doesn't keep hammering an unreachable endpoint.
+                    if any(
+                        marker in err_str
+                        for marker in (
+                            "failed to call internal api",
+                            "connection",
+                            "timed out",
+                            "timeout",
+                            "max retries",
+                        )
+                    ):
+                        print(
+                            "Network-level INTERNAL error — skipping INTERNAL "
+                            "for the remainder of this invoke_llm call."
+                        )
+                        skip_internal = True
 
         # === 1. GPU SERVER ===
         if gpu_model:
