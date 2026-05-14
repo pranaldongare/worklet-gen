@@ -42,13 +42,16 @@ API_KEYS = [
 ]
 
 openai_client = AsyncOpenAI(api_key=settings.OPENAI_API)
-MAX_RETRIES = 8  # Total attempts across all LLMs
+DEFAULT_MAX_RETRIES = 8  # Total attempts across all LLMs when fallback chain is enabled
+INTERNAL_ONLY_MAX_RETRIES = 12  # Attempts when INTERNAL_ONLY mode is on (no fallback chain)
+MAX_RETRIES = DEFAULT_MAX_RETRIES  # back-compat alias
 
 count = 0
 
 # ── INTERNAL API rate limiting (3 calls per 60 seconds, shared across the process) ──
 INTERNAL_RATE_LIMIT_CALLS = 3
 INTERNAL_RATE_LIMIT_WINDOW = 60.0  # seconds
+INTERNAL_502_WAIT_SECONDS = 60  # On 502 from INTERNAL, sleep this long then retry the same prompt
 _internal_call_times: list[float] = []
 _internal_lock = threading.Lock()
 
@@ -106,31 +109,54 @@ async def invoke_llm(
     {contents}
     """
 
-    # Sticky per-call flag: once INTERNAL has a network-level failure, skip it for
-    # the remaining attempts in this invoke_llm call so we don't waste time/quota.
+    # INTERNAL_ONLY mode means: do NOT fall back to GPU/Gemini/OpenAI even if INTERNAL fails.
+    # Requires USE_INTERNAL=true as well; ignored otherwise.
+    internal_only = (
+        SWITCHES.get("INTERNAL_ONLY", False) and SWITCHES.get("USE_INTERNAL", False)
+    )
+    max_retries = INTERNAL_ONLY_MAX_RETRIES if internal_only else DEFAULT_MAX_RETRIES
+
+    # Sticky per-call flag: once INTERNAL has a non-recoverable failure, skip it for
+    # the remaining attempts so we don't waste time/quota. Disabled in INTERNAL_ONLY
+    # mode since there's nothing else to fall back to.
     skip_internal = False
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        print(f"\n=== Attempt {attempt}/{MAX_RETRIES} ===")
+    for attempt in range(1, max_retries + 1):
+        print(f"\n=== Attempt {attempt}/{max_retries} ===")
 
         # === 0. INTERNAL API ===
         if SWITCHES.get("USE_INTERNAL", False) and not skip_internal:
             if INTERNALLLM is None:
-                print("INTERNAL enabled but module unavailable — skipping for this call.")
-                skip_internal = True
+                print("INTERNAL enabled but module unavailable.")
+                if not internal_only:
+                    skip_internal = True
             elif not _internal_config_complete():
                 print(
                     "INTERNAL enabled but config incomplete "
-                    "(need INTERNAL_BASE_URL, INTERNAL_CLIENT_KEY, INTERNAL_API_TOKEN, INTERNAL_MODEL_ID) — "
-                    "skipping for this call."
+                    "(need INTERNAL_BASE_URL, INTERNAL_CLIENT_KEY, INTERNAL_API_TOKEN, INTERNAL_MODEL_ID)."
                 )
-                skip_internal = True
+                if not internal_only:
+                    skip_internal = True
             elif not _internal_rate_limit_acquire():
-                print(
-                    f"INTERNAL rate-limited "
-                    f"(>{INTERNAL_RATE_LIMIT_CALLS} calls in {INTERNAL_RATE_LIMIT_WINDOW:.0f}s); "
-                    f"falling through to GPU/fallbacks."
+                # In INTERNAL_ONLY mode we wait for a slot instead of falling through
+                # (since there's no GPU/Gemini/OpenAI to fall through to).
+                wait_secs = (
+                    INTERNAL_RATE_LIMIT_WINDOW / INTERNAL_RATE_LIMIT_CALLS
+                    if internal_only
+                    else 0
                 )
+                if internal_only:
+                    print(
+                        f"INTERNAL rate-limited; waiting {wait_secs:.0f}s for next slot..."
+                    )
+                    await asyncio.sleep(wait_secs)
+                    continue
+                else:
+                    print(
+                        f"INTERNAL rate-limited "
+                        f"(>{INTERNAL_RATE_LIMIT_CALLS} calls in {INTERNAL_RATE_LIMIT_WINDOW:.0f}s); "
+                        f"falling through to GPU/fallbacks."
+                    )
             else:
                 try:
                     print("Trying INTERNAL API...")
@@ -150,9 +176,22 @@ async def invoke_llm(
                 except Exception as exc:
                     err_str = str(exc).lower()
                     print(f"INTERNAL API failed: {exc}")
-                    # Sticky-skip on network-level failures so the rest of the
-                    # call doesn't keep hammering an unreachable endpoint.
-                    if any(
+
+                    # 502 → wait 60s and retry the same prompt (don't fall through this
+                    # iteration, and don't sticky-skip — the upstream is just temporarily down).
+                    is_502 = "502" in err_str or "bad gateway" in err_str
+                    if is_502:
+                        print(
+                            f"Got 502 from INTERNAL — sleeping "
+                            f"{INTERNAL_502_WAIT_SECONDS}s before retrying the same prompt..."
+                        )
+                        await asyncio.sleep(INTERNAL_502_WAIT_SECONDS)
+                        continue  # skip GPU/Gemini/OpenAI fallbacks this iteration
+
+                    # Non-502 network errors: sticky-skip INTERNAL for the rest of the
+                    # call when we have a fallback chain to fall back to. In INTERNAL_ONLY
+                    # mode we just keep retrying.
+                    if not internal_only and any(
                         marker in err_str
                         for marker in (
                             "failed to call internal api",
@@ -167,6 +206,11 @@ async def invoke_llm(
                             "for the remainder of this invoke_llm call."
                         )
                         skip_internal = True
+
+        # In INTERNAL_ONLY mode, skip the fallback chain entirely and retry INTERNAL.
+        if internal_only:
+            await asyncio.sleep(5)
+            continue
 
         # === 1. GPU SERVER ===
         if gpu_model:
@@ -269,4 +313,4 @@ async def invoke_llm(
         await asyncio.sleep(2)
 
     # If all attempts exhausted
-    raise RuntimeError(f"All {MAX_RETRIES} fallback attempts failed.")
+    raise RuntimeError(f"All {max_retries} attempts failed.")

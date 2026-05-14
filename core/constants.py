@@ -7,6 +7,7 @@ SWITCHES = {
     "GENERATE_KEYWORD": True,  # Whether to generate appropriate keywords for reference search(uses worklet title as default otherwise)
     "RANK_REFERENCES": True,  # Whether to rank references based on relevance
     "USE_INTERNAL": settings.USE_INTERNAL,  # Use INTERNAL API as primary path before GPU/Gemini/OpenAI fallbacks
+    "INTERNAL_ONLY": settings.INTERNAL_ONLY,  # If True, only use INTERNAL (no fallback); attempts bumped to 12
     "RATE_LIMIT_INTERNAL": True,  # Apply 3-call-per-60s rate limit to INTERNAL API. Set False to disable when quota allows.
     "FALLBACK_TO_GEMINI": True,  # Fallback to Gemini if Ollama fails
     "FALLBACK_TO_OPENAI": True,  # Fallback to OpenAI if BOTH Ollama and Gemini fails

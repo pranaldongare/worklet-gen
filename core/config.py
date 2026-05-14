@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     INTERNAL_USER_EMAIL: str = ""
     INTERNAL_MODEL_ID: str = ""
     USE_INTERNAL: bool = False  # Set to True in .env to enable INTERNAL API as primary path
+    INTERNAL_ONLY: bool = False  # If True, ONLY use INTERNAL — no fallback to GPU/Gemini/OpenAI (attempts bumped to 12)
 
     class Config:
         env_file = ".env"
